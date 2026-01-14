@@ -47,7 +47,10 @@
       "properties": {
         "antigravity.installScope": {
           "type": "string",
-          "enum": ["global", "project"],
+          "enum": [
+            "global",
+            "project"
+          ],
           "enumDescriptions": [
             "全局安装到 ~/.gemini/skills/",
             "项目级安装到 .agent/skills/"
@@ -69,6 +72,20 @@
           "type": "string",
           "default": "",
           "description": "GitHub 个人访问令牌 (PAT)。配置后可将请求频率限制从 60次/小时 提升至 5000次/小时。"
+        },
+        "antigravity.deepseekApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "DeepSeek API Key，用于自动翻译技能描述为中文。"
+        },
+        "antigravity.language": {
+          "type": "string",
+          "enum": [
+            "",
+            "zh-CN"
+          ],
+          "default": "",
+          "description": "技能市场显示语言（为空则显示原文，zh-CN 则自动翻译为中文）。"
         }
       }
     }
