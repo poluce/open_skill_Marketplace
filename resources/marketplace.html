@@ -483,6 +483,9 @@
         <div class="sub-filter-chip" data-source="openai" onclick="setSourceFilter('openai')">
           <span class="source-icon" style="background: #10a37f;"></span> OpenAI
         </div>
+        <div class="sub-filter-chip" data-source="huggingface" onclick="setSourceFilter('huggingface')">
+          <span class="source-icon" style="background: #FFD21E;"></span> HuggingFace
+        </div>
       </div>
 
       <div class="skill-list" id="skillList">
@@ -562,7 +565,13 @@
           card.className = s.isOfficial ? 'skill-card official' : 'skill-card';
           if (s.isInstalled) card.className += ' installed';
           
-          const officialTag = s.isOfficial ? '<span class="official-tag">官方</span>' : '';
+          const sourceMap = { 
+              'anthropic': 'Anthropic', 
+              'openai': 'OpenAI', 
+              'huggingface': 'HuggingFace' 
+          };
+          const sourceDisplayName = sourceMap[s.source] || (s.source ? s.source.charAt(0).toUpperCase() + s.source.slice(1) : '');
+          const officialTag = s.isOfficial ? `<span class="official-tag">官方 · ${sourceDisplayName}</span>` : '';
           
           const repoBtn = s.isOfficial && s.repoLink ? 
               `<button class="btn-outline" onclick="openRepo('${s.repoLink}')">查看</button>` : '';

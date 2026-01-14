@@ -249,12 +249,59 @@ export class OpenAISkillSource extends BaseSkillSource {
 }
 
 /**
+ * HuggingFace 官方技能源
+ */
+export class HuggingFaceSkillSource extends BaseSkillSource {
+    protected owner = 'huggingface';
+    protected repo = 'skills';
+    protected defaultBranch = 'main';
+
+    async fetchSkills(): Promise<Skill[]> {
+        try {
+            const skillsPath = 'skills';
+            const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents/${skillsPath}`);
+            const dirs = JSON.parse(dirContents).filter((item: any) => item.type === 'dir');
+            console.log(`HuggingFace 发现 ${dirs.length} 个潜在技能目录`);
+
+            const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadata(skillsPath, dir.name));
+            const results = await Promise.all(skillPromises);
+
+            const finalSkills = results
+                .filter((s): s is ClaudeSkill => s !== null)
+                .map(s => {
+                    const category = s.category || this.internalGuessCategory(s);
+                    return {
+                        id: s.id,
+                        name: s.name,
+                        desc: s.description,
+                        category: category,
+                        icon: 'H',
+                        colors: ['#FFD21E', '#FF9D00'] as [string, string],
+                        isOfficial: true,
+                        repoLink: s.repoLink,
+                        repoOwner: this.owner,
+                        repoName: this.repo,
+                        skillPath: `skills/${s.id}`,
+                        source: 'huggingface'
+                    };
+                });
+            console.log(`HuggingFace 成功解析 ${finalSkills.length} 个技能`);
+            return finalSkills;
+        } catch (e) {
+            console.error('HuggingFace 技能抓取失败:', e);
+            return [];
+        }
+    }
+}
+
+/**
  * 统一聚合入口类
  */
 export class GithubSkillSource {
     private sources: BaseSkillSource[] = [
         new AnthropicSkillSource(),
-        new OpenAISkillSource()
+        new OpenAISkillSource(),
+        new HuggingFaceSkillSource()
     ];
 
     private seedSkills: Skill[] = [
@@ -285,6 +332,20 @@ export class GithubSkillSource {
             repoName: 'skills',
             skillPath: 'skills/.curated/gh-address-comments',
             source: 'openai'
+        },
+        {
+            id: 'hugging-face-datasets',
+            name: 'Hugging Face Datasets',
+            desc: '在 Hugging Face Hub 上创建和管理数据集。支持 SQL 查询和转换。',
+            category: '分析',
+            icon: 'H',
+            colors: ['#FFD21E', '#FF9D00'],
+            isOfficial: true,
+            repoLink: 'https://github.com/huggingface/skills/tree/main/skills/hugging-face-datasets',
+            repoOwner: 'huggingface',
+            repoName: 'skills',
+            skillPath: 'skills/hugging-face-datasets',
+            source: 'huggingface'
         }
     ];
 
