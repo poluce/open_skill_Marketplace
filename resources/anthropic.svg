@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 100 100"
+     width="100"
+     height="100">
+
+  <!-- 背景 -->
+  <rect width="100" height="100" fill="#D7764F" rx="8"/>
+
+  <!-- AI 字形：整体左移 5 个单位以实现视觉居中 -->
+  <g fill="#000000" transform="translate(-5, 0)">
+    <!-- A 左腿 -->
+    <path d="M40,25 L20,75 L28,75 L48,25 Z"/>
+    <!-- A 右腿 -->
+    <path d="M48,25 L68,75 L60,75 L40,25 Z"/>
+    <!-- A 横杠 -->
+    <path d="M28,58 L52,58 L54,63 L30,63 Z"/>
+    <!-- I -->
+    <path d="M62,25 L70,25 L90,75 L82,75 Z"/>
+  </g>
+</svg>

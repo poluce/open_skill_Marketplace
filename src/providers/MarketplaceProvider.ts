@@ -3,18 +3,21 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Skill } from '../models/Skill';
 import { GithubSkillSource } from '../services/GithubSkillSource';
+import { SkillInstaller } from '../services/SkillInstaller';
 
 export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider {
 
     public static readonly viewType = 'skill-marketplace.views.sidebar';
     private _view?: vscode.WebviewView;
     private _githubSource: GithubSkillSource;
+    private _installer: SkillInstaller;
     private _allSkills: Skill[] = [];
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
     ) {
         this._githubSource = new GithubSkillSource();
+        this._installer = new SkillInstaller();
     }
 
     public async resolveWebviewView(
@@ -41,6 +44,9 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                 case 'install':
                     this._handleInstall(data.skillId, data.skillName);
                     break;
+                case 'uninstall':
+                    this._handleUninstall(data.skillId, data.skillName);
+                    break;
                 case 'openRepo':
                     if (data.url) {
                         vscode.env.openExternal(vscode.Uri.parse(data.url));
@@ -48,6 +54,12 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                     break;
                 case 'search':
                     console.log(`搜索技能: ${data.query}`);
+                    break;
+                case 'ready':
+                    this._refreshView();
+                    break;
+                case 'configureToken':
+                    this._handleConfigureToken();
                     break;
             }
         });
@@ -59,19 +71,40 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
      * 异步加载官方技能
      */
     private async _loadOfficialSkills() {
+        let isRateLimited = false;
         try {
-            const claudeSkills = await this._githubSource.fetchSkillList();
-            const officialSkills: Skill[] = claudeSkills.map(skill => this._githubSource.toUnifiedSkill(skill));
+            const officialSkills = await this._githubSource.fetchSkillList();
             
-            // 仅使用官方技能
-            this._allSkills = [...officialSkills];
-            
-            // 刷新 WebView
-            if (this._view) {
-                this._view.webview.html = this._getHtmlForWebview(this._view.webview);
+            // 如果只拿到了 2 个（种子数据数量），且 fetchSkillList 内部抛出了 warn，说明可能受限
+            // 这里简单判断：如果数量过少，提示可能受限
+            if (officialSkills.length <= 2) {
+                isRateLimited = true;
             }
+
+            // 标记已安装状态
+            const installedIds = this._installer.getInstalledSkillIds();
+            for (const skill of officialSkills) {
+                skill.isInstalled = installedIds.includes(String(skill.id));
+            }
+            
+            this._allSkills = [...officialSkills];
+            this._refreshView(isRateLimited);
         } catch (error) {
             console.error('加载官方技能失败:', error);
+            this._refreshView(true);
+        }
+    }
+
+    /**
+     * 刷新 WebView
+     */
+    private _refreshView(isRateLimited: boolean = false) {
+        if (this._view) {
+            this._view.webview.postMessage({ 
+                command: 'updateSkills', 
+                skills: this._allSkills,
+                isRateLimited
+            });
         }
     }
 
@@ -79,16 +112,40 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
      * 处理安装请求
      */
     private async _handleInstall(skillId: string | number, skillName: string) {
+        // 使用更健壮的匹配（不区分 string/number 类型）
+        const skill = this._allSkills.find(s => String(s.id) === String(skillId));
+        
+        if (!skill) {
+            vscode.window.showErrorMessage(`未找到技能: ${skillName}`);
+            return;
+        }
+
+        // 执行安装（传递完整的 Skill 对象）
+        const success = await this._installer.installSkill(skill);
+        
+        if (success) {
+            // 更新已安装状态并刷新视图
+            skill.isInstalled = true;
+            this._refreshView();
+        }
+    }
+
+    /**
+     * 处理删除请求
+     */
+    private async _handleUninstall(skillId: string | number, skillName: string) {
         const skill = this._allSkills.find(s => s.id === skillId);
         
-        if (skill?.isOfficial) {
-            vscode.window.showInformationMessage(`正在安装官方技能: ${skillName}`, '查看源码').then(selection => {
-                if (selection === '查看源码' && skill.repoLink) {
-                    vscode.env.openExternal(vscode.Uri.parse(skill.repoLink));
-                }
-            });
-        } else {
-            vscode.window.showInformationMessage(`正在安装技能: ${skillName}`);
+        if (!skill) {
+            return;
+        }
+
+        // 执行删除
+        const success = this._installer.uninstallSkill(String(skillId), skillName);
+        
+        if (success) {
+            skill.isInstalled = false;
+            this._refreshView();
         }
     }
 
@@ -96,6 +153,25 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
         if (this._view) {
             const accentColor = vscode.workspace.getConfiguration('antigravity').get<string>('accentColor', '#8A2BE2');
             this._view.webview.postMessage({ command: 'updateAccentColor', color: accentColor });
+        }
+    }
+
+    /**
+     * 处理 Token 配置请求
+     */
+    private async _handleConfigureToken() {
+        const token = await vscode.window.showInputBox({
+            prompt: '请输入您的 GitHub 个人访问令牌 (Personal Access Token)',
+            placeHolder: 'ghp_xxxxxxxxxxxx',
+            password: true,
+            ignoreFocusOut: true
+        });
+
+        if (token !== undefined) {
+            const config = vscode.workspace.getConfiguration('antigravity');
+            await config.update('githubToken', token, vscode.ConfigurationTarget.Global);
+            vscode.window.showInformationMessage('GitHub Token 已保存，正在重新加载技能列表...');
+            this._loadOfficialSkills();
         }
     }
 

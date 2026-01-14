@@ -45,15 +45,30 @@
     "configuration": {
       "title": "Antigravity 技能市场",
       "properties": {
+        "antigravity.installScope": {
+          "type": "string",
+          "enum": ["global", "project"],
+          "enumDescriptions": [
+            "全局安装到 ~/.gemini/skills/",
+            "项目级安装到 .agent/skills/"
+          ],
+          "default": "global",
+          "description": "技能安装范围"
+        },
         "antigravity.skillsPath": {
           "type": "string",
           "default": "",
-          "description": "本地技能存储目录路径。留空则使用默认路径。"
+          "description": "自定义技能目录路径（覆盖默认路径）"
         },
         "antigravity.accentColor": {
           "type": "string",
           "default": "#8A2BE2",
           "description": "技能市场界面的强调色（支持 CSS 颜色值，如 #8A2BE2, rgba(0,0,0,1) 等）。"
+        },
+        "antigravity.githubToken": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub 个人访问令牌 (PAT)。配置后可将请求频率限制从 60次/小时 提升至 5000次/小时。"
         }
       }
     }

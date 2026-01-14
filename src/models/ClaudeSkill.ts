@@ -9,6 +9,8 @@ export interface ClaudeSkill {
     name: string;
     /** 映射自 SKILL.md 的 description */
     description: string;
+    /** 可选分类信息 */
+    category?: string;
     /** 可选许可证信息 */
     license?: string;
     /** SKILL.md 的 raw 链接 */
