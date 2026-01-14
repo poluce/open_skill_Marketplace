@@ -67,6 +67,9 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                 case 'setLanguage':
                     this._handleSetLanguage(data.lang);
                     break;
+                case 'setShowAiCategories':
+                    vscode.workspace.getConfiguration('antigravity').update('showAiCategories', data.show, vscode.ConfigurationTarget.Global);
+                    break;
             }
         });
 
@@ -93,10 +96,19 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                 skill.isInstalled = installedIds.includes(String(skill.id));
             }
 
+            // 1. 尝试从本地缓存预填充翻译和分类（实现零等待切换）
+            for (const skill of officialSkills) {
+                const cached = this._translator.getCachedTranslation(String(skill.id));
+                if (cached) {
+                    skill.translatedDesc = cached.translated;
+                    skill.aiCategory = cached.category;
+                }
+            }
+
             this._allSkills = [...officialSkills];
             this._refreshView(isRateLimited);
 
-            // 异步翻译描述（后台执行，不阻塞显示）
+            // 2. 异步增量翻译（仅针对无缓存的内容）
             this._translateSkillDescriptions();
         } catch (error) {
             console.error('加载官方技能失败:', error);
@@ -108,7 +120,14 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
      * 异步翻译技能描述
      */
     private async _translateSkillDescriptions() {
-        const skillsToTranslate = this._allSkills.map(s => ({ id: String(s.id), desc: s.desc }));
+        // 仅找出真正需要翻译（无缓存）的技能
+        const skillsToTranslate = this._allSkills
+            .filter(s => !s.translatedDesc)
+            .map(s => ({ id: String(s.id), desc: s.desc }));
+
+        if (skillsToTranslate.length === 0) {
+            return;
+        }
 
         // 调用翻译，带进度回调
         const translations = await this._translator.translateSkills(skillsToTranslate, (current, total) => {
@@ -120,11 +139,16 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
             }
         });
 
-        // 更新描述
+        // 更新翻译描述和 AI 分类字段（不覆盖原始属性）
         for (const skill of this._allSkills) {
-            const translated = translations.get(String(skill.id));
-            if (translated && translated !== skill.desc) {
-                skill.desc = translated;
+            const result = translations.get(String(skill.id));
+            if (result) {
+                if (result.translated) {
+                    skill.translatedDesc = result.translated;
+                }
+                if (result.category) {
+                    skill.aiCategory = result.category;
+                }
             }
         }
 
@@ -248,8 +272,10 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                 // 已有 Key，直接翻译
                 this._translateSkillDescriptions();
             }
+        } else {
+            // “原文”模式：只需刷新视图，Webview 会根据 currentLanguage 自动切换显示
+            this._refreshView();
         }
-        // 如果选择原文，UI 会根据 currentTab 刷新，此处不需要额外逻辑
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
@@ -263,10 +289,13 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
 
         // 注入数据
         const currentLang = config.get<string>('language', '');
+        const showAiCategories = config.get<boolean>('showAiCategories', true);
+
         html = html.replace('{{accentColor}}', accentColor);
         html = html.replace('{{accentGlow}}', glowColor);
         html = html.replace('[/*{{skillsData}}*/]', JSON.stringify(this._allSkills));
         html = html.replace('/*{{currentLang}}*/', currentLang);
+        html = html.replace('/*{{showAiCategories}}*/', String(showAiCategories));
 
         return html;
     }

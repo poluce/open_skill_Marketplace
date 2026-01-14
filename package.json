@@ -86,6 +86,11 @@
           ],
           "default": "",
           "description": "技能市场显示语言（为空则显示原文，zh-CN 则自动翻译为中文）。"
+        },
+        "antigravity.showAiCategories": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否在界面中显示 AI 自动识别的分类（编程、办公等）。"
         }
       }
     }

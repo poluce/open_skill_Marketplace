@@ -595,6 +595,11 @@
                 <option value="">原文</option>
                 <option value="zh-CN">中文</option>
             </select>
+            <div style="display: flex; align-items: center; gap: 4px; font-size: 11px; opacity: 0.8; margin-left: 4px;">
+                <input type="checkbox" id="aiCategoriesToggle" onchange="onToggleAiCategories()"
+                    style="cursor: pointer;" />
+                <label for="aiCategoriesToggle" style="cursor: pointer; white-space: nowrap;">显示分类</label>
+            </div>
         </div>
 
         <div id="translationProgress" class="translation-progress" style="display: none;">
@@ -623,11 +628,11 @@
                 全部
             </div>
             <div class="category-chip official-chip" onclick="setCategory('官方')">✓ 官方</div>
-            <div class="category-chip" onclick="setCategory('编程')">编程</div>
-            <div class="category-chip" onclick="setCategory('办公')">办公</div>
-            <div class="category-chip" onclick="setCategory('创意')">创意</div>
-            <div class="category-chip" onclick="setCategory('分析')">分析</div>
-            <div class="category-chip" onclick="setCategory('生活')">生活</div>
+            <div class="category-chip ai-category" onclick="setCategory('编程')">编程</div>
+            <div class="category-chip ai-category" onclick="setCategory('办公')">办公</div>
+            <div class="category-chip ai-category" onclick="setCategory('创意')">创意</div>
+            <div class="category-chip ai-category" onclick="setCategory('分析')">分析</div>
+            <div class="category-chip ai-category" onclick="setCategory('生活')">生活</div>
         </div>
 
         <!-- 二级筛选器：官方技能源 -->
@@ -665,18 +670,44 @@
         let currentSourceFilter = oldState.source || '全部';
         let currentTab = oldState.tab || 'available';
         let currentLanguage = '/*{{currentLang}}*/';
+        let showAiCategories = '/*{{showAiCategories}}*/' === 'true';
 
         let skills = [/*{{skillsData}}*/];
 
-        // 初始化语言下拉框
+        // 初始化 UI 状态
         document.getElementById('langSelect').value = currentLanguage;
+        document.getElementById('aiCategoriesToggle').checked = showAiCategories;
+        updateAiCategoriesVisibility();
 
         function saveState() {
             vscode.setState({
                 category: currentCategory,
                 source: currentSourceFilter,
                 tab: currentTab,
-                language: currentLanguage
+                language: currentLanguage,
+                showAiCategories: showAiCategories
+            });
+        }
+
+        function onToggleAiCategories() {
+            showAiCategories = document.getElementById('aiCategoriesToggle').checked;
+            vscode.postMessage({ command: 'setShowAiCategories', show: showAiCategories });
+            updateAiCategoriesVisibility();
+
+            // 如果当前正好选中了被隐藏的 AI 分类，自动切回“全部”
+            const aiCategories = ['编程', '办公', '创意', '分析', '生活'];
+            if (!showAiCategories && aiCategories.includes(currentCategory)) {
+                setCategory('全部');
+            } else {
+                updateUI();
+            }
+            saveState();
+        }
+
+        function updateAiCategoriesVisibility() {
+            const chips = document.querySelectorAll('.ai-category');
+            chips.forEach(chip => {
+                chip.style.display = showAiCategories ? 'block' : 'none';
             });
         }
 
@@ -685,8 +716,10 @@
         }
 
         function onLangChange() {
-            const lang = document.getElementById('langSelect').value;
-            vscode.postMessage({ command: 'setLanguage', lang: lang });
+            currentLanguage = document.getElementById('langSelect').value;
+            vscode.postMessage({ command: 'setLanguage', lang: currentLanguage });
+            updateUI();
+            saveState();
         }
 
         function updateUI() {
@@ -704,9 +737,12 @@
             const filtered = skills.filter(s => {
                 const matchesQuery = s.name.toLowerCase().includes(query) || s.desc.toLowerCase().includes(query);
 
-                // 分类逻辑：如果选中“官方”，展示所有 isOfficial 技能；否则匹配 s.category
+                // 分类逻辑重构：如果开启了 AI 分类且存在 aiCategory，则优先使用它
+                const actualCategory = (showAiCategories && s.aiCategory) ? s.aiCategory : s.category;
+
+                // 过滤逻辑：如果选中“官方”，展示所有 isOfficial 技能；否则匹配选中分类
                 const matchesCategory = currentCategory === '全部' ||
-                    (currentCategory === '官方' ? s.isOfficial : s.category === currentCategory);
+                    (currentCategory === '官方' ? s.isOfficial : actualCategory === currentCategory);
 
                 const matchesSource = currentCategory !== '官方' || currentSourceFilter === '全部' || s.source === currentSourceFilter;
                 return matchesQuery && matchesCategory && matchesSource;
@@ -782,7 +818,7 @@
                           <div class="skill-name">${s.name}</div>
                           ${officialTag}
                       </div>
-                      <div class="skill-desc">${s.desc}</div>
+                      <div class="skill-desc">${(currentLanguage === 'zh-CN' && s.translatedDesc) ? s.translatedDesc : s.desc}</div>
                   </div>
                   <div class="btn-group">
                       ${repoBtn}
@@ -797,7 +833,8 @@
             currentCategory = cat;
             saveState();
             document.querySelectorAll('.category-chip').forEach(chip => {
-                chip.classList.toggle('active', chip.innerText === cat || chip.innerText === '✓ ' + cat);
+                const baseText = chip.innerText.replace('✓ ', '').trim();
+                chip.classList.toggle('active', baseText === cat);
             });
             // 显示/隐藏二级筛选器
             const sourceContainer = document.getElementById('sourceFilterContainer');

@@ -13,9 +13,15 @@ interface TranslationCache {
         [skillId: string]: {
             original: string;
             translated: string;
+            category?: string;
             timestamp: number;
         };
     };
+}
+
+interface TranslationResult {
+    translated: string;
+    category: string;
 }
 
 /**
@@ -74,12 +80,14 @@ export class TranslationService {
     }
 
     /**
-     * 调用 DeepSeek API 翻译文本
+     * 调用 DeepSeek API 翻译文本并分类
      */
-    private async callDeepSeekApi(text: string): Promise<string> {
+    private async callDeepSeekApi(text: string): Promise<TranslationResult> {
         const apiKey = this.getApiKey();
+        const defaultResult: TranslationResult = { translated: text, category: '' };
+
         if (!apiKey) {
-            return text; // 无 API Key，返回原文
+            return defaultResult;
         }
 
         return new Promise((resolve) => {
@@ -88,15 +96,22 @@ export class TranslationService {
                 messages: [
                     {
                         role: 'system',
-                        content: '你是一个专业的翻译助手。请将用户提供的英文文本翻译为简洁的中文。只输出翻译结果，不要添加任何解释。'
+                        content: `你是一个专业的助手。请将用户提供的英文文本翻译为简洁的中文，并根据内容将其归类为以下分类之一：编程、办公、创意、分析、生活。
+请严格以 JSON 格式输出，格式如下：
+{
+  "translated": "中文翻译",
+  "category": "分类名称"
+}
+如果没有合适的分类，category 请留空。`
                     },
                     {
                         role: 'user',
                         content: text
                     }
                 ],
-                max_tokens: 200,
-                temperature: 0.3
+                max_tokens: 300,
+                temperature: 0.3,
+                response_format: { type: 'json_object' }
             });
 
             const options = {
@@ -118,27 +133,35 @@ export class TranslationService {
                     try {
                         if (res.statusCode === 200) {
                             const response = JSON.parse(data);
-                            const translated = response.choices?.[0]?.message?.content?.trim();
-                            resolve(translated || text);
+                            const content = response.choices?.[0]?.message?.content;
+                            if (content) {
+                                const parsed = JSON.parse(content);
+                                resolve({
+                                    translated: parsed.translated || text,
+                                    category: parsed.category || ''
+                                });
+                            } else {
+                                resolve(defaultResult);
+                            }
                         } else {
                             console.error('DeepSeek API 错误:', res.statusCode, data);
-                            resolve(text);
+                            resolve(defaultResult);
                         }
                     } catch (e) {
                         console.error('解析 DeepSeek 响应失败:', e);
-                        resolve(text);
+                        resolve(defaultResult);
                     }
                 });
             });
 
             req.on('error', (e) => {
                 console.error('DeepSeek 请求失败:', e);
-                resolve(text);
+                resolve(defaultResult);
             });
 
             req.setTimeout(10000, () => {
                 req.destroy();
-                resolve(text);
+                resolve(defaultResult);
             });
 
             req.write(requestBody);
@@ -155,49 +178,78 @@ export class TranslationService {
     }
 
     /**
-     * 获取翻译后的描述（带缓存）
+     * 获取翻译后的描述及其分类（带缓存）
      */
-    async getTranslatedDescription(skillId: string, originalDesc: string): Promise<string> {
-        // 如果已经是中文，直接返回
-        if (this.isChinese(originalDesc)) {
-            return originalDesc;
-        }
-
-        // 无 API Key，返回原文
-        if (!this.getApiKey()) {
-            return originalDesc;
-        }
-
+    async getTranslatedDescriptionAndCategory(skillId: string, originalDesc: string): Promise<TranslationResult> {
+        // 如果已经是中文，且无 API Key，我们无法重新分类，只能返回原文
+        // 但如果由于已配置 Key，我们可能还是想分类。
+        // 为了简化，如果已经是中文且缓存里没数据，直接返回
         this.loadCache();
+        const cached = this.cache.translations[skillId];
+
+        if (this.isChinese(originalDesc)) {
+            return {
+                translated: originalDesc,
+                category: cached?.category || ''
+            };
+        }
+
+        // 无 API Key，且缓存无数据，返回原文
+        if (!this.getApiKey() && !cached) {
+            return { translated: originalDesc, category: '' };
+        }
 
         // 检查缓存
-        const cached = this.cache.translations[skillId];
-        if (cached && cached.original === originalDesc) {
-            return cached.translated;
+        if (cached && cached.original === originalDesc && cached.category) {
+            return { translated: cached.translated, category: cached.category };
         }
 
-        // 调用 API 翻译
-        const translated = await this.callDeepSeekApi(originalDesc);
+        // 调用 API 翻译并分类
+        const result = await this.callDeepSeekApi(originalDesc);
+
+        // 如果翻译失败了但有缓存，优先使用缓存
+        if (result.translated === originalDesc && cached) {
+            return { translated: cached.translated, category: cached.category || '' };
+        }
 
         // 保存到缓存
         this.cache.translations[skillId] = {
             original: originalDesc,
-            translated: translated,
+            translated: result.translated,
+            category: result.category,
             timestamp: Date.now()
         };
         this.saveCache();
 
-        return translated;
+        return result;
+    }
+
+    /**
+     * 同步获取已缓存的翻译结果（不需要 API Key，不发起请求）
+     */
+    public getCachedTranslation(skillId: string): TranslationResult | undefined {
+        this.loadCache();
+        const cached = this.cache.translations[skillId];
+        if (cached) {
+            return {
+                translated: cached.translated,
+                category: cached.category || ''
+            };
+        }
+        return undefined;
     }
 
     /**
      * 批量翻译技能描述
      */
+    /**
+     * 批量翻译并分类技能描述
+     */
     async translateSkills(
         skills: Array<{ id: string; desc: string }>,
         onProgress?: (current: number, total: number) => void
-    ): Promise<Map<string, string>> {
-        const result = new Map<string, string>();
+    ): Promise<Map<string, TranslationResult>> {
+        const result = new Map<string, TranslationResult>();
         const total = skills.length;
         let processed = 0;
 
@@ -206,7 +258,7 @@ export class TranslationService {
         for (let i = 0; i < skills.length; i += batchSize) {
             const batch = skills.slice(i, i + batchSize);
             const translations = await Promise.all(
-                batch.map(s => this.getTranslatedDescription(String(s.id), s.desc))
+                batch.map(s => this.getTranslatedDescriptionAndCategory(String(s.id), s.desc))
             );
 
             batch.forEach((s, idx) => {

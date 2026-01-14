@@ -18,4 +18,8 @@ export interface Skill {
     source?: string;
     /** 仓库分支 (main / master) */
     branch?: string;
+    /** 翻译后的描述 (显示决策权交由前端) */
+    translatedDesc?: string;
+    /** AI 识别的分类 (显示决策权交由前端) */
+    aiCategory?: string;
 }
