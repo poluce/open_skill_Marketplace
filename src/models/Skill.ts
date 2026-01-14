@@ -16,4 +16,6 @@ export interface Skill {
     skillPath?: string;
     /** 技能来源标识 (anthropic / openai) */
     source?: string;
+    /** 仓库分支 (main / master) */
+    branch?: string;
 }

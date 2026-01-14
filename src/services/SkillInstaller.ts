@@ -19,7 +19,7 @@ export class SkillInstaller {
      */
     getInstallPath(): string {
         const config = vscode.workspace.getConfiguration('antigravity');
-        
+
         // 优先使用自定义路径
         const customPath = config.get<string>('skillsPath', '');
         if (customPath) {
@@ -28,7 +28,7 @@ export class SkillInstaller {
 
         // 根据 installScope 决定路径
         const scope = config.get<string>('installScope', 'global');
-        
+
         if (scope === 'project') {
             // 项目级安装
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -46,7 +46,7 @@ export class SkillInstaller {
      */
     getInstalledSkillIds(): string[] {
         const installPath = this.getInstallPath();
-        
+
         if (!fs.existsSync(installPath)) {
             return [];
         }
@@ -79,7 +79,7 @@ export class SkillInstaller {
      */
     uninstallSkill(skillId: string, skillName: string): boolean {
         const skillDir = path.join(this.getInstallPath(), skillId);
-        
+
         if (!fs.existsSync(skillDir)) {
             vscode.window.showWarningMessage(`技能 "${skillName}" 未安装`);
             return false;
@@ -103,7 +103,7 @@ export class SkillInstaller {
     async installSkill(skill: Skill): Promise<boolean> {
         const skillId = String(skill.id);
         const targetDir = path.join(this.getInstallPath(), skillId);
-        
+
         const config = vscode.workspace.getConfiguration('antigravity');
         const scope = config.get<string>('installScope', 'global');
         if (scope === 'project' && !vscode.workspace.workspaceFolders?.[0]) {
@@ -119,7 +119,7 @@ export class SkillInstaller {
         try {
             // 1. 获取技能目录下的所有文件列表
             const files = await this.fetchSkillFiles(skill);
-            
+
             if (files.length === 0) {
                 vscode.window.showErrorMessage(`技能 "${skill.name}" 没有找到可安装的文件`);
                 return false;
@@ -131,10 +131,10 @@ export class SkillInstaller {
             }
 
             // 3. 下载所有文件
-            const downloadPromises = files.map(file => 
+            const downloadPromises = files.map(file =>
                 this.downloadFile(skill, file.path, path.join(targetDir, file.name))
             );
-            
+
             await Promise.all(downloadPromises);
 
             vscode.window.showInformationMessage(`技能 "${skill.name}" 已安装到 ${targetDir}`);
@@ -156,7 +156,7 @@ export class SkillInstaller {
             const url = `${GITHUB_API_BASE}/repos/${skill.repoOwner}/${skill.repoName}/contents/${skill.skillPath}`;
             const config = vscode.workspace.getConfiguration('antigravity');
             const token = config.get<string>('githubToken', '');
-            
+
             const headers: any = {
                 'User-Agent': 'VSCode-Antigravity-SkillMarketplace',
                 'Accept': 'application/vnd.github.v3+json'
@@ -203,8 +203,9 @@ export class SkillInstaller {
      */
     private downloadFile(skill: Skill, filePath: string, targetPath: string): Promise<void> {
         return new Promise((resolve, reject) => {
-            const url = `${RAW_GITHUB_BASE}/${skill.repoOwner}/${skill.repoName}/main/${filePath}`;
-            
+            const branch = skill.branch || 'main';
+            const url = `${RAW_GITHUB_BASE}/${skill.repoOwner}/${skill.repoName}/${branch}/${filePath}`;
+
             https.get(url, (res) => {
                 if (res.statusCode === 200) {
                     const writeStream = fs.createWriteStream(targetPath);

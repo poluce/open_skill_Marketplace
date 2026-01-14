@@ -30,7 +30,7 @@ export abstract class BaseSkillSource {
             const url = `${GITHUB_API_BASE}${path}`;
             const config = vscode.workspace.getConfiguration('antigravity');
             const token = config.get<string>('githubToken', '');
-            
+
             const headers: any = {
                 'User-Agent': 'VSCode-Antigravity-SkillMarketplace',
                 'Accept': 'application/vnd.github.v3+json'
@@ -185,7 +185,8 @@ export class AnthropicSkillSource extends BaseSkillSource {
                         repoOwner: this.owner,
                         repoName: this.repo,
                         skillPath: `skills/${s.id}`,
-                        source: 'anthropic'
+                        source: 'anthropic',
+                        branch: this.defaultBranch
                     };
                 });
             console.log(`Anthropic 成功解析 ${finalSkills.length} 个技能`);
@@ -208,16 +209,16 @@ export class OpenAISkillSource extends BaseSkillSource {
 
     async fetchSkills(): Promise<Skill[]> {
         const allSkills: Skill[] = [];
-        
+
         const fetchResults = await Promise.all(this.categories.map(async (path) => {
             try {
                 const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents/${path}`);
                 const dirs = JSON.parse(dirContents).filter((item: any) => item.type === 'dir');
                 console.log(`OpenAI [${path}] 发现 ${dirs.length} 个潜在技能目录`);
-                
+
                 const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadata(path, dir.name));
                 const results = await Promise.all(skillPromises);
-                
+
                 return results
                     .filter((s): s is ClaudeSkill => s !== null)
                     .map(s => {
@@ -234,7 +235,8 @@ export class OpenAISkillSource extends BaseSkillSource {
                             repoOwner: this.owner,
                             repoName: this.repo,
                             skillPath: `${path}/${s.id}`,
-                            source: 'openai'
+                            source: 'openai',
+                            branch: this.defaultBranch
                         };
                     });
             } catch (err) {
@@ -282,7 +284,8 @@ export class HuggingFaceSkillSource extends BaseSkillSource {
                         repoOwner: this.owner,
                         repoName: this.repo,
                         skillPath: `skills/${s.id}`,
-                        source: 'huggingface'
+                        source: 'huggingface',
+                        branch: this.defaultBranch
                     };
                 });
             console.log(`HuggingFace 成功解析 ${finalSkills.length} 个技能`);
@@ -295,13 +298,142 @@ export class HuggingFaceSkillSource extends BaseSkillSource {
 }
 
 /**
+ * Superpowers 技能源 (obra/superpowers)
+ */
+export class SuperpowersSkillSource extends BaseSkillSource {
+    protected owner = 'obra';
+    protected repo = 'superpowers';
+    protected defaultBranch = 'main';
+
+    async fetchSkills(): Promise<Skill[]> {
+        try {
+            const skillsPath = 'skills';
+            const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents/${skillsPath}`);
+            const dirs = JSON.parse(dirContents).filter((item: any) => item.type === 'dir');
+            console.log(`Superpowers 发现 ${dirs.length} 个潜在技能目录`);
+
+            const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadata(skillsPath, dir.name));
+            const results = await Promise.all(skillPromises);
+
+            const finalSkills = results
+                .filter((s): s is ClaudeSkill => s !== null)
+                .map(s => {
+                    const category = s.category || this.internalGuessCategory(s);
+                    return {
+                        id: s.id,
+                        name: s.name,
+                        desc: s.description,
+                        category: category,
+                        icon: 'S',
+                        colors: ['#FF6B35', '#F7931E'] as [string, string],
+                        isOfficial: true,
+                        repoLink: s.repoLink,
+                        repoOwner: this.owner,
+                        repoName: this.repo,
+                        skillPath: `skills/${s.id}`,
+                        source: 'superpowers',
+                        branch: this.defaultBranch
+                    };
+                });
+            console.log(`Superpowers 成功解析 ${finalSkills.length} 个技能`);
+            return finalSkills;
+        } catch (e) {
+            console.error('Superpowers 技能抓取失败:', e);
+            return [];
+        }
+    }
+}
+
+/**
+ * Composio 技能源 (ComposioHQ/awesome-claude-skills)
+ * 特殊结构：技能目录直接在根目录下，非 skills 子目录
+ */
+export class ComposioSkillSource extends BaseSkillSource {
+    protected owner = 'ComposioHQ';
+    protected repo = 'awesome-claude-skills';
+    protected defaultBranch = 'master';
+
+    // 需要排除的非技能目录
+    private excludeDirs = ['.claude-plugin', '.github', 'template-skill'];
+
+    async fetchSkills(): Promise<Skill[]> {
+        try {
+            // 直接获取根目录
+            const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents`);
+            const dirs = JSON.parse(dirContents)
+                .filter((item: any) => item.type === 'dir' && !this.excludeDirs.includes(item.name));
+            console.log(`Composio 发现 ${dirs.length} 个潜在技能目录`);
+
+            const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadataRoot(dir.name));
+            const results = await Promise.all(skillPromises);
+
+            const finalSkills = results
+                .filter((s): s is ClaudeSkill => s !== null)
+                .map(s => {
+                    const category = s.category || this.internalGuessCategory(s);
+                    return {
+                        id: s.id,
+                        name: s.name,
+                        desc: s.description,
+                        category: category,
+                        icon: 'C',
+                        colors: ['#7C3AED', '#A855F7'] as [string, string],
+                        isOfficial: true,
+                        repoLink: s.repoLink,
+                        repoOwner: this.owner,
+                        repoName: this.repo,
+                        skillPath: s.id,
+                        source: 'composio',
+                        branch: this.defaultBranch
+                    };
+                });
+            console.log(`Composio 成功解析 ${finalSkills.length} 个技能`);
+            return finalSkills;
+        } catch (e) {
+            console.error('Composio 技能抓取失败:', e);
+            return [];
+        }
+    }
+
+    /**
+     * 从根目录获取技能元数据 (技能目录直接在根目录)
+     */
+    private async fetchSkillMetadataRoot(skillId: string): Promise<ClaudeSkill | null> {
+        try {
+            const rawUrl = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${this.defaultBranch}/${skillId}/SKILL.md`;
+            const content = await this.fetchRawContent(rawUrl);
+            const metadata = this.parseSkillMd(content);
+
+            if (!metadata.name || !metadata.description) {
+                return null;
+            }
+
+            return {
+                id: skillId,
+                name: metadata.name,
+                description: metadata.description,
+                category: metadata.category,
+                license: metadata.license,
+                rawUrl,
+                repoLink: `https://github.com/${this.owner}/${this.repo}/tree/${this.defaultBranch}/${skillId}`,
+                isOfficial: true
+            };
+        } catch (error) {
+            return null;
+        }
+    }
+}
+
+/**
  * 统一聚合入口类
  */
 export class GithubSkillSource {
     private sources: BaseSkillSource[] = [
         new AnthropicSkillSource(),
         new OpenAISkillSource(),
-        new HuggingFaceSkillSource()
+        new HuggingFaceSkillSource(),
+        new SuperpowersSkillSource(),
+        new ComposioSkillSource()
     ];
 
     private seedSkills: Skill[] = [
@@ -317,7 +449,8 @@ export class GithubSkillSource {
             repoOwner: 'anthropics',
             repoName: 'skills',
             skillPath: 'skills/algorithmic-art',
-            source: 'anthropic'
+            source: 'anthropic',
+            branch: 'main'
         },
         {
             id: 'gh-address-comments',
@@ -331,7 +464,8 @@ export class GithubSkillSource {
             repoOwner: 'openai',
             repoName: 'skills',
             skillPath: 'skills/.curated/gh-address-comments',
-            source: 'openai'
+            source: 'openai',
+            branch: 'main'
         },
         {
             id: 'hugging-face-datasets',
@@ -345,7 +479,38 @@ export class GithubSkillSource {
             repoOwner: 'huggingface',
             repoName: 'skills',
             skillPath: 'skills/hugging-face-datasets',
-            source: 'huggingface'
+            source: 'huggingface',
+            branch: 'main'
+        },
+        {
+            id: 'brainstorming',
+            name: 'Brainstorming',
+            desc: '将创意想法转化为完整的设计规格，通过协作式对话探索需求和方案。',
+            category: '编程',
+            icon: 'S',
+            colors: ['#FF6B35', '#F7931E'],
+            isOfficial: true,
+            repoLink: 'https://github.com/obra/superpowers/tree/main/skills/brainstorming',
+            repoOwner: 'obra',
+            repoName: 'superpowers',
+            skillPath: 'skills/brainstorming',
+            source: 'superpowers',
+            branch: 'main'
+        },
+        {
+            id: 'mcp-builder',
+            name: 'MCP Builder',
+            desc: '创建高质量的 MCP 服务器，使 LLM 能够通过精心设计的工具与外部服务交互。',
+            category: '编程',
+            icon: 'C',
+            colors: ['#7C3AED', '#A855F7'],
+            isOfficial: true,
+            repoLink: 'https://github.com/ComposioHQ/awesome-claude-skills/tree/master/mcp-builder',
+            repoOwner: 'ComposioHQ',
+            repoName: 'awesome-claude-skills',
+            skillPath: 'mcp-builder',
+            source: 'composio',
+            branch: 'master'
         }
     ];
 
@@ -357,7 +522,7 @@ export class GithubSkillSource {
             console.log('正在从 GitHub 实时获取技能列表...');
             const results = await Promise.all(this.sources.map(s => s.fetchSkills()));
             const allSkills = results.flat();
-            
+
             if (allSkills.length > 0) {
                 this.saveToCache(allSkills);
                 return allSkills;
