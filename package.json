@@ -1,0 +1,87 @@
+{
+  "name": "skill-marketplace",
+  "displayName": "Antigravity 技能市场",
+  "description": "Antigravity 技能的发现、安装与管理工具。",
+  "version": "0.0.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/poluce/open_skill_Marketplace.git"
+  },
+  "publisher": "poluce",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "antigravity-marketplace",
+          "title": "Antigravity 技能市场",
+          "icon": "resources/marketplace.svg"
+        }
+      ]
+    },
+    "views": {
+      "antigravity-marketplace": [
+        {
+          "type": "webview",
+          "id": "skill-marketplace.views.sidebar",
+          "name": "技能列表",
+          "icon": "resources/marketplace.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "skill-marketplace.openMarketplace",
+        "title": "打开技能市场"
+      }
+    ],
+    "configuration": {
+      "title": "Antigravity 技能市场",
+      "properties": {
+        "antigravity.skillsPath": {
+          "type": "string",
+          "default": "",
+          "description": "本地技能存储目录路径。留空则使用默认路径。"
+        },
+        "antigravity.accentColor": {
+          "type": "string",
+          "default": "#8A2BE2",
+          "description": "技能市场界面的强调色（支持 CSS 颜色值，如 #8A2BE2, rgba(0,0,0,1) 等）。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "typescript-eslint": "^8.52.0",
+    "eslint": "^9.39.2",
+    "esbuild": "^0.27.2",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.3",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}
