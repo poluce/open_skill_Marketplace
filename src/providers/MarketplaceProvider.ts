@@ -39,7 +39,7 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
         this._allSkills = [];
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
-        // 异步加载官方技能
+        // 异步加载高赞技能
         this._loadOfficialSkills();
 
         webviewView.webview.onDidReceiveMessage(data => {
@@ -77,7 +77,7 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
     }
 
     /**
-     * 异步加载官方技能
+     * 异步加载高赞技能
      */
     private async _loadOfficialSkills() {
         let isRateLimited = false;
@@ -111,7 +111,7 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
             // 2. 异步增量翻译（仅针对无缓存的内容）
             this._translateSkillDescriptions();
         } catch (error) {
-            console.error('加载官方技能失败:', error);
+            console.error('加载高赞技能失败:', error);
             this._refreshView(true);
         }
     }

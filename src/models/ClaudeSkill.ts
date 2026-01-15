@@ -1,5 +1,5 @@
 /**
- * Claude 官方技能类型定义
+ * Claude 高赞技能类型定义
  * 来源：https://github.com/anthropics/skills
  */
 export interface ClaudeSkill {
@@ -17,12 +17,12 @@ export interface ClaudeSkill {
     rawUrl: string;
     /** GitHub 页面链接 */
     repoLink: string;
-    /** 标识为官方技能 */
-    isOfficial: true;
+    /** 标识为高赞技能 */
+    isFeatured: true;
 }
 
 /**
- * 统一技能类型（兼容本地 mock 和官方技能）
+ * 统一技能类型（兼容本地 mock 和高赞技能）
  */
 export interface UnifiedSkill {
     id: string | number;
@@ -31,6 +31,6 @@ export interface UnifiedSkill {
     category: string;
     icon: string;
     colors: [string, string];
-    isOfficial?: boolean;
+    isFeatured?: boolean;
     repoLink?: string;
 }

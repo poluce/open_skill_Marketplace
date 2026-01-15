@@ -5,7 +5,7 @@ export interface Skill {
     category: string;
     icon: string;
     colors: [string, string];
-    isOfficial?: boolean;
+    isFeatured?: boolean;
     repoLink?: string;
     isInstalled?: boolean;
     /** 仓库所有者 (anthropics / openai) */

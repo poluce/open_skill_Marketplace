@@ -143,7 +143,7 @@ export abstract class BaseSkillSource {
                 license: metadata.license,
                 rawUrl,
                 repoLink: `https://github.com/${this.owner}/${this.repo}/tree/${this.defaultBranch}/${subdir}/${skillId}`,
-                isOfficial: true
+                isFeatured: true
             };
         } catch (error) {
             return null;
@@ -152,7 +152,7 @@ export abstract class BaseSkillSource {
 }
 
 /**
- * Anthropic 官方技能源
+ * Anthropic 高赞技能源
  */
 export class AnthropicSkillSource extends BaseSkillSource {
     protected owner = 'anthropics';
@@ -180,7 +180,7 @@ export class AnthropicSkillSource extends BaseSkillSource {
                         category: category,
                         icon: '✓',
                         colors: ['#6366f1', '#8b5cf6'] as [string, string],
-                        isOfficial: true,
+                        isFeatured: true,
                         repoLink: s.repoLink,
                         repoOwner: this.owner,
                         repoName: this.repo,
@@ -199,7 +199,7 @@ export class AnthropicSkillSource extends BaseSkillSource {
 }
 
 /**
- * OpenAI 官方技能源
+ * OpenAI 高赞技能源
  */
 export class OpenAISkillSource extends BaseSkillSource {
     protected owner = 'openai';
@@ -230,7 +230,7 @@ export class OpenAISkillSource extends BaseSkillSource {
                             category: category,
                             icon: 'O',
                             colors: ['#10a37f', '#108060'] as [string, string],
-                            isOfficial: true,
+                            isFeatured: true,
                             repoLink: s.repoLink,
                             repoOwner: this.owner,
                             repoName: this.repo,
@@ -251,7 +251,7 @@ export class OpenAISkillSource extends BaseSkillSource {
 }
 
 /**
- * HuggingFace 官方技能源
+ * HuggingFace 高赞技能源
  */
 export class HuggingFaceSkillSource extends BaseSkillSource {
     protected owner = 'huggingface';
@@ -279,7 +279,7 @@ export class HuggingFaceSkillSource extends BaseSkillSource {
                         category: category,
                         icon: 'H',
                         colors: ['#FFD21E', '#FF9D00'] as [string, string],
-                        isOfficial: true,
+                        isFeatured: true,
                         repoLink: s.repoLink,
                         repoOwner: this.owner,
                         repoName: this.repo,
@@ -326,7 +326,7 @@ export class SuperpowersSkillSource extends BaseSkillSource {
                         category: category,
                         icon: 'S',
                         colors: ['#FF6B35', '#F7931E'] as [string, string],
-                        isOfficial: true,
+                        isFeatured: true,
                         repoLink: s.repoLink,
                         repoOwner: this.owner,
                         repoName: this.repo,
@@ -378,7 +378,7 @@ export class ComposioSkillSource extends BaseSkillSource {
                         category: category,
                         icon: 'C',
                         colors: ['#7C3AED', '#A855F7'] as [string, string],
-                        isOfficial: true,
+                        isFeatured: true,
                         repoLink: s.repoLink,
                         repoOwner: this.owner,
                         repoName: this.repo,
@@ -416,7 +416,7 @@ export class ComposioSkillSource extends BaseSkillSource {
                 license: metadata.license,
                 rawUrl,
                 repoLink: `https://github.com/${this.owner}/${this.repo}/tree/${this.defaultBranch}/${skillId}`,
-                isOfficial: true
+                isFeatured: true
             };
         } catch (error) {
             return null;
@@ -444,7 +444,7 @@ export class GithubSkillSource {
             category: '创意',
             icon: '✓',
             colors: ['#6366f1', '#8b5cf6'],
-            isOfficial: true,
+            isFeatured: true,
             repoLink: 'https://github.com/anthropics/skills/tree/main/skills/algorithmic-art',
             repoOwner: 'anthropics',
             repoName: 'skills',
@@ -459,7 +459,7 @@ export class GithubSkillSource {
             category: '编程',
             icon: 'O',
             colors: ['#10a37f', '#108060'],
-            isOfficial: true,
+            isFeatured: true,
             repoLink: 'https://github.com/openai/skills/tree/main/skills/.curated/gh-address-comments',
             repoOwner: 'openai',
             repoName: 'skills',
@@ -474,7 +474,7 @@ export class GithubSkillSource {
             category: '分析',
             icon: 'H',
             colors: ['#FFD21E', '#FF9D00'],
-            isOfficial: true,
+            isFeatured: true,
             repoLink: 'https://github.com/huggingface/skills/tree/main/skills/hugging-face-datasets',
             repoOwner: 'huggingface',
             repoName: 'skills',
@@ -489,7 +489,7 @@ export class GithubSkillSource {
             category: '编程',
             icon: 'S',
             colors: ['#FF6B35', '#F7931E'],
-            isOfficial: true,
+            isFeatured: true,
             repoLink: 'https://github.com/obra/superpowers/tree/main/skills/brainstorming',
             repoOwner: 'obra',
             repoName: 'superpowers',
@@ -504,7 +504,7 @@ export class GithubSkillSource {
             category: '编程',
             icon: 'C',
             colors: ['#7C3AED', '#A855F7'],
-            isOfficial: true,
+            isFeatured: true,
             repoLink: 'https://github.com/ComposioHQ/awesome-claude-skills/tree/master/mcp-builder',
             repoOwner: 'ComposioHQ',
             repoName: 'awesome-claude-skills',
@@ -515,7 +515,7 @@ export class GithubSkillSource {
     ];
 
     /**
-     * 获取合并后的官方技能列表
+     * 获取合并后的高赞技能列表
      */
     async fetchSkillList(): Promise<Skill[]> {
         try {

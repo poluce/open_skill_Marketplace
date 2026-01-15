@@ -328,7 +328,7 @@
           opacity: 0.85;
       }
 
-      .official-tag {
+      .featured-tag {
           display: inline-flex;
           align-items: center;
           background: linear-gradient(135deg, #6366f1, #8b5cf6);
@@ -372,11 +372,11 @@
           background: rgba(255, 255, 255, 0.05);
       }
 
-      .skill-card.official {
+      .skill-card.featured {
           border-color: rgba(99, 102, 241, 0.3);
       }
 
-      /* 已删除 .category-chip.official-chip.active 特殊样式,统一使用 .category-chip.active */
+      /* 已删除 .category-chip.featured-chip.active 特殊样式,统一使用 .category-chip.active */
 
       @keyframes pulse {
           0% {
@@ -623,8 +623,8 @@
         <div class="category-chip active" onclick="setCategory('全部')">
           全部
         </div>
-        <div class="category-chip official-chip" onclick="setCategory('官方')">
-          ✓ 官方
+        <div class="category-chip featured-chip" onclick="setCategory('高赞')">
+          ✓ 高赞
         </div>
         <div class="category-chip ai-category" onclick="setCategory('编程')">
           编程
@@ -643,7 +643,7 @@
         </div>
       </div>
 
-      <!-- 二级筛选器：官方技能源 -->
+      <!-- 二级筛选器：高赞技能源 -->
       <div class="sub-filter-container" id="sourceFilterContainer">
         <div
           class="sub-filter-chip active"
@@ -788,15 +788,15 @@
           const actualCategory =
             showAiCategories && s.aiCategory ? s.aiCategory : s.category;
 
-          // 过滤逻辑：如果选中“官方”，展示所有 isOfficial 技能；否则匹配选中分类
+          // 过滤逻辑：如果选中“高赞”，展示所有 isFeatured 技能；否则匹配选中分类
           const matchesCategory =
             currentCategory === "全部" ||
-            (currentCategory === "官方"
-              ? s.isOfficial
+            (currentCategory === "高赞"
+              ? s.isFeatured
               : actualCategory === currentCategory);
 
           const matchesSource =
-            currentCategory !== "官方" ||
+            currentCategory !== "高赞" ||
             currentSourceFilter === "全部" ||
             s.source === currentSourceFilter;
           return matchesQuery && matchesCategory && matchesSource;
@@ -828,7 +828,7 @@
 
       function createSkillCard(s) {
         const card = document.createElement("div");
-        card.className = s.isOfficial ? "skill-card official" : "skill-card";
+        card.className = s.isFeatured ? "skill-card featured" : "skill-card";
         if (s.isInstalled) card.className += " installed";
 
         const sourceMap = {
@@ -843,12 +843,12 @@
           (s.source
             ? s.source.charAt(0).toUpperCase() + s.source.slice(1)
             : "");
-        const officialTag = s.isOfficial
-          ? `<span class="official-tag">官</span>`
+        const featuredTag = s.isFeatured
+          ? `<span class="featured-tag">赞</span>`
           : "";
 
         const repoBtn =
-          s.isOfficial && s.repoLink
+          s.isFeatured && s.repoLink
             ? `<button class="btn-outline" onclick="openRepo('${s.repoLink}')">查看</button>`
             : "";
 
@@ -883,7 +883,6 @@
                   <div class="skill-info">
                       <div class="skill-header">
                           <div class="skill-name">${s.name}</div>
-                          ${officialTag}
                       </div>
                       <div class="skill-desc">${
                         currentLanguage === "zh-CN" && s.translatedDesc
@@ -911,7 +910,7 @@
         const sourceContainer = document.getElementById(
           "sourceFilterContainer"
         );
-        if (cat === "官方") {
+        if (cat === "高赞") {
           sourceContainer.classList.add("visible");
         } else {
           sourceContainer.classList.remove("visible");
