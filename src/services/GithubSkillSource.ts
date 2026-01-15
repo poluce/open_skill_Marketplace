@@ -174,7 +174,7 @@ export class AnthropicSkillSource extends BaseSkillSource {
                 .map(s => {
                     const category = s.category || this.internalGuessCategory(s);
                     return {
-                        id: s.id,
+                        id: `anthropic:${s.id}`,
                         name: s.name,
                         desc: s.description,
                         category: category,
@@ -224,7 +224,7 @@ export class OpenAISkillSource extends BaseSkillSource {
                     .map(s => {
                         const category = s.category || this.internalGuessCategory(s);
                         return {
-                            id: s.id,
+                            id: `openai:${s.id}`,
                             name: s.name,
                             desc: s.description,
                             category: category,
@@ -273,7 +273,7 @@ export class HuggingFaceSkillSource extends BaseSkillSource {
                 .map(s => {
                     const category = s.category || this.internalGuessCategory(s);
                     return {
-                        id: s.id,
+                        id: `huggingface:${s.id}`,
                         name: s.name,
                         desc: s.description,
                         category: category,
@@ -320,7 +320,7 @@ export class SuperpowersSkillSource extends BaseSkillSource {
                 .map(s => {
                     const category = s.category || this.internalGuessCategory(s);
                     return {
-                        id: s.id,
+                        id: `superpowers:${s.id}`,
                         name: s.name,
                         desc: s.description,
                         category: category,
@@ -372,7 +372,7 @@ export class ComposioSkillSource extends BaseSkillSource {
                 .map(s => {
                     const category = s.category || this.internalGuessCategory(s);
                     return {
-                        id: s.id,
+                        id: `composio:${s.id}`,
                         name: s.name,
                         desc: s.description,
                         category: category,
@@ -438,7 +438,7 @@ export class GithubSkillSource {
 
     private seedSkills: Skill[] = [
         {
-            id: 'algorithmic-art',
+            id: 'anthropic:algorithmic-art',
             name: 'Algorithmic Art',
             desc: '使用代码生成精美的算法艺术图。',
             category: '创意',
@@ -453,7 +453,7 @@ export class GithubSkillSource {
             branch: 'main'
         },
         {
-            id: 'gh-address-comments',
+            id: 'openai:gh-address-comments',
             name: 'Address Comments',
             desc: '自动分析并回复 GitHub PR 中的评审意见。',
             category: '编程',
@@ -468,7 +468,7 @@ export class GithubSkillSource {
             branch: 'main'
         },
         {
-            id: 'hugging-face-datasets',
+            id: 'huggingface:hugging-face-datasets',
             name: 'Hugging Face Datasets',
             desc: '在 Hugging Face Hub 上创建和管理数据集。支持 SQL 查询和转换。',
             category: '分析',
@@ -483,7 +483,7 @@ export class GithubSkillSource {
             branch: 'main'
         },
         {
-            id: 'brainstorming',
+            id: 'superpowers:brainstorming',
             name: 'Brainstorming',
             desc: '将创意想法转化为完整的设计规格，通过协作式对话探索需求和方案。',
             category: '编程',
@@ -498,7 +498,7 @@ export class GithubSkillSource {
             branch: 'main'
         },
         {
-            id: 'mcp-builder',
+            id: 'composio:mcp-builder',
             name: 'MCP Builder',
             desc: '创建高质量的 MCP 服务器，使 LLM 能够通过精心设计的工具与外部服务交互。',
             category: '编程',

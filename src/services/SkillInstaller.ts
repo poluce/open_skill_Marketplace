@@ -15,30 +15,88 @@ const GITHUB_API_BASE = 'https://api.github.com';
 export class SkillInstaller {
 
     /**
-     * 获取安装目标路径
+     * 获取安装目标路径，并执行环境校验
      */
     getInstallPath(): string {
         const config = vscode.workspace.getConfiguration('antigravity');
-
-        // 优先使用自定义路径
-        const customPath = config.get<string>('skillsPath', '');
-        if (customPath) {
-            return this.expandPath(customPath);
-        }
-
-        // 根据 installScope 决定路径
+        const agentType = config.get<string>('agentType', 'antigravity');
         const scope = config.get<string>('installScope', 'global');
 
+        // 优先锁定基准目录
+        let basePath = '';
         if (scope === 'project') {
-            // 项目级安装
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-            if (workspaceFolder) {
-                return path.join(workspaceFolder.uri.fsPath, '.agent', 'skills');
+            if (!workspaceFolder) {
+                throw new Error('请先打开一个 VS Code 项目或工作区以进行项目级安装。');
+            }
+            basePath = workspaceFolder.uri.fsPath;
+        } else {
+            basePath = os.homedir();
+        }
+
+        // 根据 Agent 和 Scope 派生最终路径
+        let finalPath = '';
+        switch (agentType) {
+            case 'antigravity':
+                finalPath = scope === 'project' 
+                    ? path.join(basePath, '.agent', 'skills')
+                    : path.join(basePath, '.gemini', 'antigravity', 'skills');
+                break;
+            case 'claude':
+                finalPath = scope === 'project'
+                    ? path.join(basePath, '.claude', 'skills')
+                    : path.join(basePath, '.claude', 'skills');
+                break;
+            case 'codex':
+                finalPath = scope === 'project'
+                    ? path.join(basePath, '.codex', 'skills')
+                    : path.join(basePath, '.codex', 'skills');
+                break;
+            case 'opencode':
+                finalPath = scope === 'project'
+                    ? path.join(basePath, '.opencode', 'skill')
+                    : path.join(basePath, '.config', 'opencode', 'skill');
+                break;
+            default:
+                finalPath = path.join(basePath, '.gemini', 'skills');
+        }
+
+        // 全局校验：如果目录不存在，提示用户安装 Agent
+        if (scope === 'global' && !fs.existsSync(finalPath)) {
+            // 注意：对于 Open Code 这种深层路径，可能需要检查其父目录
+            const checkPath = agentType === 'opencode' ? path.dirname(finalPath) : finalPath;
+            if (!fs.existsSync(checkPath)) {
+                throw new Error(`未检测到 ${this.getAgentName(agentType)} 的环境，请先安装该 Agent 工具。`);
             }
         }
 
-        // 全局安装
-        return path.join(os.homedir(), '.gemini', 'skills');
+        return finalPath;
+    }
+
+    private getAgentName(type: string): string {
+        const names: Record<string, string> = {
+            'antigravity': 'Antigravity',
+            'claude': 'Claude Code CLI',
+            'codex': 'Codex CLI',
+            'opencode': 'Open Code'
+        };
+        return names[type] || type;
+    }
+
+    /**
+     * 将技能 ID 转换为安全的文件目录名
+     * 例如: "anthropic:algorithmic-art" -> "anthropic--algorithmic-art"
+     */
+    private getSafeDirName(skillId: string): string {
+        return skillId.replace(/:/g, '--');
+    }
+
+    /**
+     * 将目录名还原为技能 ID (用于扫描已安装列表)
+     * 例如: "anthropic--algorithmic-art" -> "anthropic:algorithmic-art"
+     */
+    private getSkillIdFromDirName(dirName: string): string {
+        return dirName.replace(/--/g, ':');
     }
 
     /**
@@ -60,7 +118,7 @@ export class SkillInstaller {
                     const skillMdPath = path.join(installPath, entry.name, 'SKILL.md');
                     return fs.existsSync(skillMdPath);
                 })
-                .map(entry => entry.name);
+                .map(entry => this.getSkillIdFromDirName(entry.name));
         } catch {
             return [];
         }
@@ -70,7 +128,7 @@ export class SkillInstaller {
      * 检查某个技能是否已安装
      */
     isSkillInstalled(skillId: string): boolean {
-        const skillPath = path.join(this.getInstallPath(), skillId, 'SKILL.md');
+        const skillPath = path.join(this.getInstallPath(), this.getSafeDirName(skillId), 'SKILL.md');
         return fs.existsSync(skillPath);
     }
 
@@ -78,7 +136,7 @@ export class SkillInstaller {
      * 删除已安装的技能
      */
     uninstallSkill(skillId: string, skillName: string): boolean {
-        const skillDir = path.join(this.getInstallPath(), skillId);
+        const skillDir = path.join(this.getInstallPath(), this.getSafeDirName(skillId));
 
         if (!fs.existsSync(skillDir)) {
             vscode.window.showWarningMessage(`技能 "${skillName}" 未安装`);
@@ -102,7 +160,7 @@ export class SkillInstaller {
      */
     async installSkill(skill: Skill): Promise<boolean> {
         const skillId = String(skill.id);
-        const targetDir = path.join(this.getInstallPath(), skillId);
+        const targetDir = path.join(this.getInstallPath(), this.getSafeDirName(skillId));
 
         const config = vscode.workspace.getConfiguration('antigravity');
         const scope = config.get<string>('installScope', 'global');

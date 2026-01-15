@@ -558,42 +558,44 @@
           </button>
         </div>
       </div>
-      <div class="search-container">
-        <div class="search-box">
-          <span style="opacity: 0.5">🔍</span>
-          <input
-            type="text"
-            id="searchInput"
-            class="search-input"
-            placeholder="搜索技能..."
-            oninput="updateUI()"
-          />
+      <div class="search-container" style="flex-direction: column; align-items: stretch; gap: 8px;">
+        <!-- 第一行：搜索框 + 语言选择 + 分类开关 -->
+        <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+            <div class="search-box">
+              <span style="opacity: 0.5">🔍</span>
+              <input
+                type="text"
+                id="searchInput"
+                class="search-input"
+                placeholder="搜索技能..."
+                oninput="updateUI()"
+              />
+            </div>
+            <select id="langSelect" class="lang-select" onchange="onLangChange()">
+              <option value="">原文</option>
+              <option value="zh-CN">中文</option>
+            </select>
+            <div style="display: flex; align-items: center; gap: 4px; font-size: 11px; opacity: 0.8; margin-left: 2px;">
+                <input type="checkbox" id="aiCategoriesToggle" onchange="onToggleAiCategories()" style="cursor: pointer"/>
+                <label for="aiCategoriesToggle" style="cursor: pointer; white-space: nowrap">分类</label>
+            </div>
         </div>
-        <select id="langSelect" class="lang-select" onchange="onLangChange()">
-          <option value="">原文</option>
-          <option value="zh-CN">中文</option>
-        </select>
-        <div
-          style="
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            font-size: 11px;
-            opacity: 0.8;
-            margin-left: 4px;
-          "
-        >
-          <input
-            type="checkbox"
-            id="aiCategoriesToggle"
-            onchange="onToggleAiCategories()"
-            style="cursor: pointer"
-          />
-          <label
-            for="aiCategoriesToggle"
-            style="cursor: pointer; white-space: nowrap"
-            >显示分类</label
-          >
+        
+        <!-- 第二行：标签 + Agent 选择 + 范围选择 -->
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 11px; opacity: 0.7; white-space: nowrap;">安装位置:</span>
+            <div style="display: flex; gap: 4px; flex: 1;">
+                <select id="agentTypeSelect" class="lang-select" onchange="onAgentTypeChange()" title="目标 Agent" style="flex: 1;">
+                    <option value="antigravity">Antigravity</option>
+                    <option value="claude">Claude</option>
+                    <option value="codex">Codex</option>
+                    <option value="opencode">OpenCode</option>
+                </select>
+                <select id="scopeSelect" class="lang-select" onchange="onScopeChange()" title="安装位置" style="flex: 1;">
+                    <option value="global">全局</option>
+                    <option value="project">项目</option>
+                </select>
+            </div>
         </div>
       </div>
 
@@ -711,6 +713,8 @@
       let currentTab = oldState.tab || "available";
       let currentLanguage = "/*{{currentLang}}*/";
       let showAiCategories = "/*{{showAiCategories}}*/" === "true";
+      let currentAgentType = "/*{{currentAgentType}}*/";
+      let currentScope = "/*{{currentScope}}*/";
 
       let skills = [
         /*{{skillsData}}*/
@@ -719,7 +723,21 @@
       // 初始化 UI 状态
       document.getElementById("langSelect").value = currentLanguage;
       document.getElementById("aiCategoriesToggle").checked = showAiCategories;
+      document.getElementById("agentTypeSelect").value = currentAgentType || "antigravity";
+      document.getElementById("scopeSelect").value = currentScope || "global";
       updateAiCategoriesVisibility();
+
+      function onAgentTypeChange() {
+        currentAgentType = document.getElementById("agentTypeSelect").value;
+        vscode.postMessage({ command: "setAgentType", agentType: currentAgentType });
+        saveState();
+      }
+
+      function onScopeChange() {
+        currentScope = document.getElementById("scopeSelect").value;
+        vscode.postMessage({ command: "setScope", scope: currentScope });
+        saveState();
+      }
 
       function saveState() {
         vscode.setState({
@@ -728,6 +746,8 @@
           tab: currentTab,
           language: currentLanguage,
           showAiCategories: showAiCategories,
+          agentType: currentAgentType,
+          scope: currentScope
         });
       }
 

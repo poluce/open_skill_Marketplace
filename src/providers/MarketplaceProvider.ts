@@ -67,6 +67,12 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                 case 'setLanguage':
                     this._handleSetLanguage(data.lang);
                     break;
+                case 'setAgentType':
+                    vscode.workspace.getConfiguration('antigravity').update('agentType', data.agentType, vscode.ConfigurationTarget.Global);
+                    break;
+                case 'setScope':
+                    vscode.workspace.getConfiguration('antigravity').update('installScope', data.scope, vscode.ConfigurationTarget.Global);
+                    break;
                 case 'setShowAiCategories':
                     vscode.workspace.getConfiguration('antigravity').update('showAiCategories', data.show, vscode.ConfigurationTarget.Global);
                     break;
@@ -285,12 +291,16 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
         // 注入数据
         const currentLang = config.get<string>('language', '');
         const showAiCategories = config.get<boolean>('showAiCategories', true);
+        const currentAgentType = config.get<string>('agentType', 'antigravity');
+        const currentScope = config.get<string>('installScope', 'global');
 
         html = html.replace('{{accentColor}}', accentColor);
         html = html.replace('{{accentGlow}}', glowColor);
         html = html.replace('[/*{{skillsData}}*/]', JSON.stringify(this._allSkills));
         html = html.replace('/*{{currentLang}}*/', currentLang);
         html = html.replace('/*{{showAiCategories}}*/', String(showAiCategories));
+        html = html.replace('/*{{currentAgentType}}*/', currentAgentType);
+        html = html.replace('/*{{currentScope}}*/', currentScope);
 
         return html;
     }

@@ -1,7 +1,7 @@
 {
   "name": "skill-marketplace",
-  "displayName": "Antigravity 技能市场",
-  "description": "Antigravity 技能的发现、安装与管理工具。",
+  "displayName": "技能市场",
+  "description": "通用 Agent 技能的发现、安装与管理工具。",
   "version": "0.0.1",
   "repository": {
     "type": "git",
@@ -21,7 +21,7 @@
       "activitybar": [
         {
           "id": "antigravity-marketplace",
-          "title": "Antigravity 技能市场",
+          "title": "技能市场",
           "icon": "resources/marketplace.svg"
         }
       ]
@@ -31,7 +31,7 @@
         {
           "type": "webview",
           "id": "skill-marketplace.views.sidebar",
-          "name": "技能列表",
+          "name": "技能市场",
           "icon": "resources/marketplace.svg"
         }
       ]
@@ -43,8 +43,25 @@
       }
     ],
     "configuration": {
-      "title": "Antigravity 技能市场",
+      "title": "技能市场",
       "properties": {
+        "antigravity.agentType": {
+          "type": "string",
+          "enum": [
+            "antigravity",
+            "claude",
+            "codex",
+            "opencode"
+          ],
+          "enumDescriptions": [
+            "Antigravity Agent",
+            "Claude Code CLI",
+            "Codex CLI",
+            "Open Code"
+          ],
+          "default": "antigravity",
+          "description": "目标 Agent 类型"
+        },
         "antigravity.installScope": {
           "type": "string",
           "enum": [
@@ -52,8 +69,8 @@
             "project"
           ],
           "enumDescriptions": [
-            "全局安装到 ~/.gemini/skills/",
-            "项目级安装到 .agent/skills/"
+            "安装到 Agent 的全局技能目录",
+            "安装到当前工作区的 Agent 技能目录"
           ],
           "default": "global",
           "description": "技能安装范围"
