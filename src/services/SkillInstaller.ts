@@ -43,7 +43,7 @@ export class SkillInstaller {
         }
 
         // 根据 Agent 策略动态获取路径
-        const finalPath = scope === 'project' 
+        const finalPath = scope === 'project'
             ? agent.getProjectPath(basePath)
             : agent.getGlobalPath(basePath);
 
@@ -89,13 +89,13 @@ export class SkillInstaller {
      * 获取已安装的技能 ID 列表
      */
     getInstalledSkillIds(): string[] {
-        const installPath = this.getInstallPath();
-
-        if (!fs.existsSync(installPath)) {
-            return [];
-        }
-
         try {
+            const installPath = this.getInstallPath();
+
+            if (!fs.existsSync(installPath)) {
+                return [];
+            }
+
             const entries = fs.readdirSync(installPath, { withFileTypes: true });
             return entries
                 .filter(entry => entry.isDirectory())
@@ -105,7 +105,8 @@ export class SkillInstaller {
                     return fs.existsSync(skillMdPath);
                 })
                 .map(entry => this.getSkillIdFromDirName(entry.name));
-        } catch {
+        } catch (error) {
+            console.warn('获取已安装技能列表失败:', error instanceof Error ? error.message : String(error));
             return [];
         }
     }
