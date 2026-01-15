@@ -516,29 +516,41 @@ export class GithubSkillSource {
 
     /**
      * 获取合并后的高赞技能列表
+     * @returns { skills: Skill[], isRateLimited: boolean }
      */
-    async fetchSkillList(): Promise<Skill[]> {
+    async fetchSkillList(): Promise<{ skills: Skill[], isRateLimited: boolean }> {
+        let isRateLimited = false;
+        
         try {
             console.log('正在从 GitHub 实时获取技能列表...');
-            const results = await Promise.all(this.sources.map(s => s.fetchSkills()));
+            const results = await Promise.all(this.sources.map(async (source) => {
+                try {
+                    return await source.fetchSkills();
+                } catch (error) {
+                    console.warn(`技能源抓取失败:`, error);
+                    isRateLimited = true; // 任何源失败都标记为受限
+                    return [];
+                }
+            }));
             const allSkills = results.flat();
 
             if (allSkills.length > 0) {
                 this.saveToCache(allSkills);
-                return allSkills;
+                return { skills: allSkills, isRateLimited };
             }
         } catch (error) {
             console.warn('GitHub 实时抓取失败，尝试加载本地缓存:', error);
+            isRateLimited = true;
         }
 
         const cached = this.loadFromCache();
         if (cached.length > 0) {
             console.log(`成功从本地缓存加载 ${cached.length} 个技能`);
-            return cached;
+            return { skills: cached, isRateLimited: true }; // 使用缓存也标记为受限
         }
 
         console.warn('所有请求和缓存均失效，加载内置种子数据');
-        return this.seedSkills;
+        return { skills: this.seedSkills, isRateLimited: true };
     }
 
     private getCachePath(): string {

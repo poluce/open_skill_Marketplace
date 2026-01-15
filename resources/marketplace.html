@@ -228,7 +228,9 @@
           /* 显式限制高度 */
       }
 
-      .skill-card:hover .skill-card-content {
+      /* 正常情况下使用 :hover，滚动时禁用 :hover 只用 .hovered */
+      .skill-list:not(.scrolling) .skill-card:hover .skill-card-content,
+      .skill-card.hovered .skill-card-content {
           position: absolute;
           top: 0;
           left: 0;
@@ -300,7 +302,8 @@
           transition: all 0.3s ease;
       }
 
-      .skill-card:hover .skill-desc {
+      .skill-list:not(.scrolling) .skill-card:hover .skill-desc,
+      .skill-card.hovered .skill-desc {
           -webkit-line-clamp: unset;
           line-clamp: unset;
           overflow: visible;
@@ -974,6 +977,91 @@
 
       // 通知插件 WebView 已就绪，请求全量数据同步
       vscode.postMessage({ command: "ready" });
+
+      // 记录鼠标位置，用于滚轮滚动时更新悬浮状态
+      let lastMouseX = 0;
+      let lastMouseY = 0;
+
+      document.addEventListener('mousemove', (e) => {
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        // 如果当前有 hovered 卡片，鼠标移动时更新悬浮状态
+        if (currentHoveredCard) {
+          updateHoverState();
+        }
+      });
+
+      // 滚动停止检测定时器
+      let scrollTimeout = null;
+      const skillList = document.getElementById('skillList');
+      let currentHoveredCard = null;
+
+      // 更新悬浮状态的核心函数
+      function updateHoverState() {
+        // 获取当前鼠标位置下的元素
+        const elementUnderMouse = document.elementFromPoint(lastMouseX, lastMouseY);
+        if (!elementUnderMouse) {
+          if (currentHoveredCard) {
+            currentHoveredCard.classList.remove('hovered');
+            currentHoveredCard = null;
+          }
+          return;
+        }
+
+        // 向上查找 .skill-card 元素
+        const skillCard = elementUnderMouse.closest('.skill-card');
+        
+        // 如果悬浮的卡片没变，不需要更新
+        if (skillCard === currentHoveredCard) {
+          return;
+        }
+
+        // 移除旧卡片的悬浮状态
+        if (currentHoveredCard) {
+          currentHoveredCard.classList.remove('hovered');
+        }
+
+        // 设置新卡片的悬浮状态
+        if (skillCard) {
+          skillCard.classList.add('hovered');
+        }
+        currentHoveredCard = skillCard;
+      }
+
+      // 滚轮滚动时强制更新悬浮状态
+      function onScroll() {
+        // 添加 scrolling 类，禁用 CSS :hover
+        skillList.classList.add('scrolling');
+
+        // 清除之前的定时器
+        if (scrollTimeout) {
+          clearTimeout(scrollTimeout);
+        }
+
+        // 直接同步更新悬浮状态，无任何延迟
+        updateHoverState();
+
+        // 滚动停止后只移除 scrolling 类，保留 hovered 类让卡片继续悬浮
+        scrollTimeout = setTimeout(() => {
+          skillList.classList.remove('scrolling');
+          // 不移除 hovered 类，让当前卡片保持悬浮状态
+          // hovered 类会在鼠标移动到其他卡片或离开列表时自动更新
+        }, 80);
+      }
+
+      // 同时监听 wheel 和 scroll 事件，确保最大灵敏度
+      document.addEventListener('wheel', onScroll, { passive: true });
+      document.addEventListener('scroll', onScroll, { passive: true, capture: true });
+
+      // 鼠标离开卡片列表时移除 hovered 类和 scrolling 类
+      skillList.addEventListener('mouseleave', () => {
+        skillList.classList.remove('scrolling');
+        if (currentHoveredCard) {
+          currentHoveredCard.classList.remove('hovered');
+          currentHoveredCard = null;
+        }
+      });
+
 
       window.addEventListener("message", (event) => {
         const message = event.data;

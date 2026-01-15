@@ -80,15 +80,10 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
      * 异步加载高赞技能
      */
     private async _loadOfficialSkills() {
-        let isRateLimited = false;
         try {
-            const officialSkills = await this._githubSource.fetchSkillList();
-
-            // 如果只拿到了 2 个（种子数据数量），且 fetchSkillList 内部抛出了 warn，说明可能受限
-            // 这里简单判断：如果数量过少，提示可能受限
-            if (officialSkills.length <= 6) {
-                isRateLimited = true;
-            }
+            const result = await this._githubSource.fetchSkillList();
+            const officialSkills = result.skills;
+            const isRateLimited = result.isRateLimited;
 
             // 标记已安装状态
             const installedIds = this._installer.getInstalledSkillIds();
