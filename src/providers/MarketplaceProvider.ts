@@ -300,9 +300,8 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
 
         html = html.replace('{{cssUri}}', cssUri.toString());
         html = html.replace('{{jsUri}}', jsUri.toString());
-        html = html.replace('{{accentColor}}', accentColor);
-        html = html.replace('{{accentGlow}}', glowColor);
         html = html.replace('[/*{{skillsData}}*/]', JSON.stringify(this._allSkills));
+        html = html.replace('[/*{{sourceConfigs}}*/]', JSON.stringify(this._githubSource.getSourceConfigs()));
         html = html.replace('/*{{currentLang}}*/', currentLang);
         html = html.replace('/*{{showAiCategories}}*/', String(showAiCategories));
         html = html.replace('/*{{currentAgentType}}*/', currentAgentType);

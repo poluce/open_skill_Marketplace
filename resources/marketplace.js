@@ -4,6 +4,7 @@ document.getElementById("aiCategoriesToggle").checked = showAiCategories;
 document.getElementById("agentTypeSelect").value = currentAgentType || "antigravity";
 document.getElementById("scopeSelect").value = currentScope || "global";
 updateAiCategoriesVisibility();
+initSourceFilters();
 
 function onAgentTypeChange() {
     currentAgentType = document.getElementById("agentTypeSelect").value;
@@ -52,6 +53,37 @@ function updateAiCategoriesVisibility() {
     chips.forEach((chip) => {
         chip.style.display = showAiCategories ? "block" : "none";
     });
+}
+
+/**
+ * 动态初始化来源筛选器（从 sourceConfigs 生成）
+ */
+function initSourceFilters() {
+    const container = document.getElementById('sourceFilterContainer');
+    if (!container || !sourceConfigs || sourceConfigs.length === 0) {
+        return;
+    }
+
+    sourceConfigs.forEach(config => {
+        const chip = document.createElement('div');
+        chip.className = 'sub-filter-chip';
+        chip.setAttribute('data-source', config.id);
+        chip.onclick = () => setSourceFilter(config.id);
+        chip.innerHTML = `
+            <img class="source-icon" src="${config.iconUrl}" alt="${config.displayName}">
+            ${config.displayName}
+        `;
+        container.appendChild(chip);
+    });
+}
+
+/**
+ * 从配置获取来源显示名称
+ */
+function getSourceDisplayName(sourceId) {
+    if (!sourceId) return '';
+    const config = sourceConfigs.find(c => c.id === sourceId);
+    return config ? config.displayName : (sourceId.charAt(0).toUpperCase() + sourceId.slice(1));
 }
 
 function configureToken() {
@@ -127,14 +159,7 @@ function createSkillCard(s) {
         card.className += " installed";
     }
 
-    const sourceMap = {
-        anthropic: "Anthropic",
-        openai: "OpenAI",
-        huggingface: "HuggingFace",
-        superpowers: "Superpowers",
-        composio: "Composio",
-    };
-    const sourceDisplayName = sourceMap[s.source] || (s.source ? s.source.charAt(0).toUpperCase() + s.source.slice(1) : "");
+    const sourceDisplayName = getSourceDisplayName(s.source);
     const featuredTag = s.isFeatured ? `<span class="featured-tag">赞</span>` : "";
 
     const repoBtn = s.isFeatured && s.repoLink

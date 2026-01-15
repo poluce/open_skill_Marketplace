@@ -1,154 +1,130 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>技能市场</title>
-    <link rel="stylesheet" href="{{cssUri}}">
-    <style>
-      :root {
-          --accent-color: {{accentColor}};
-          --accent-glow: {{accentGlow}};
-          --card-bg: var(--vscode-welcomePage-tileBackground, rgba(255, 255, 255, 0.05));
-          --text-main: var(--vscode-foreground);
-          --text-dim: var(--vscode-descriptionForeground);
-      }
-    </style>
-  </head>
 
-  <body>
-    <div class="container">
-      <div id="warningBanner" class="warning-banner">
-        <i>⚠️</i>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>技能市场</title>
+  <link rel="stylesheet" href="{{cssUri}}">
+  <style>
+    :root {
+      --accent-color: #8A2BE2;
+      --accent-glow: rgba(138, 43, 226, 0.3);
+      --card-bg: var(--vscode-welcomePage-tileBackground, rgba(255, 255, 255, 0.05));
+      --text-main: var(--vscode-foreground);
+      --text-dim: var(--vscode-descriptionForeground);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div id="warningBanner" class="warning-banner">
+      <i>⚠️</i>
+      <div>
         <div>
-          <div>
-            由于访问 GitHub API 过于频繁 (60次/h)，当前加载的是本地缓存。配置
-            Token 可解封。
-          </div>
-          <button class="warning-btn" onclick="configureToken()">
-            立即设置 Token
-          </button>
+          由于访问 GitHub API 过于频繁 (60次/h)，当前加载的是本地缓存。配置
+          Token 可解封。
         </div>
+        <button class="warning-btn" onclick="configureToken()">
+          立即设置 Token
+        </button>
       </div>
-      <div class="search-container" style="flex-direction: column; align-items: stretch; gap: 8px;">
-        <!-- 第一行：搜索框 + 语言选择 + 分类开关 -->
-        <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
-            <div class="search-box">
-              <span style="opacity: 0.5">🔍</span>
-              <input
-                type="text"
-                id="searchInput"
-                class="search-input"
-                placeholder="搜索技能..."
-                oninput="updateUI()"
-              />
-            </div>
-            <select id="langSelect" class="lang-select" onchange="onLangChange()">
-              <option value="">原文</option>
-              <option value="zh-CN">中文</option>
-            </select>
-            <div style="display: flex; align-items: center; gap: 4px; font-size: 11px; opacity: 0.8; margin-left: 2px;">
-                <input type="checkbox" id="aiCategoriesToggle" onchange="onToggleAiCategories()" style="cursor: pointer"/>
-                <label for="aiCategoriesToggle" style="cursor: pointer; white-space: nowrap">分类</label>
-            </div>
+    </div>
+    <div class="search-container" style="flex-direction: column; align-items: stretch; gap: 8px;">
+      <!-- 第一行：搜索框 + 语言选择 + 分类开关 -->
+      <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+        <div class="search-box">
+          <span style="opacity: 0.5">🔍</span>
+          <input type="text" id="searchInput" class="search-input" placeholder="搜索技能..." oninput="updateUI()" />
         </div>
-        
-        <!-- 第二行：标签 + Agent 选择 + 范围选择 -->
-        <div style="display: flex; align-items: center; gap: 8px;">
-            <select id="agentTypeSelect" class="lang-select" style="flex: 1;" onchange="onAgentTypeChange()">
-                <option value="antigravity">Antigravity (Gemini)</option>
-                <option value="claude">Claude</option>
-                <option value="codex">Codex</option>
-                <option value="opencode">Open Code</option>
-            </select>
-            <select id="scopeSelect" class="lang-select" style="flex: 1;" onchange="onScopeChange()">
-                <option value="global">全局安装 (Home)</option>
-                <option value="project">项目安装 (Workspace)</option>
-            </select>
+        <select id="langSelect" class="lang-select" onchange="onLangChange()">
+          <option value="">原文</option>
+          <option value="zh-CN">中文</option>
+        </select>
+        <div style="display: flex; align-items: center; gap: 4px; font-size: 11px; opacity: 0.8; margin-left: 2px;">
+          <input type="checkbox" id="aiCategoriesToggle" onchange="onToggleAiCategories()" style="cursor: pointer" />
+          <label for="aiCategoriesToggle" style="cursor: pointer; white-space: nowrap">分类</label>
         </div>
       </div>
 
-      <!-- 翻译进度条 -->
-      <div id="translationProgress" class="translation-progress" style="display: none;">
-        <div class="progress-info">
-            <span>正在智能分类及翻译技能列表...</span>
-            <span id="progressPercent">0%</span>
-        </div>
-        <div class="progress-track">
-            <div id="progressFill" class="progress-fill"></div>
-        </div>
-      </div>
-
-      <div class="tabs">
-        <div class="tab active" id="tabAvailable" onclick="setTab('available')">
-          发现技能 <span class="tab-count" id="countAvailable">0</span>
-        </div>
-        <div class="tab" id="tabInstalled" onclick="setTab('installed')">
-          已安装 <span class="tab-count" id="countInstalled">0</span>
-        </div>
-      </div>
-
-      <div class="categories" id="categories">
-        <div class="category-chip active" onclick="setCategory('全部')">全部</div>
-        <div class="category-chip" onclick="setCategory('高赞')">✓ 高赞榜</div>
-        <div class="category-chip ai-category" onclick="setCategory('编程')">编程</div>
-        <div class="category-chip ai-category" onclick="setCategory('办公')">办公</div>
-        <div class="category-chip ai-category" onclick="setCategory('创意')">创意</div>
-        <div class="category-chip ai-category" onclick="setCategory('分析')">分析</div>
-        <div class="category-chip ai-category" onclick="setCategory('生活')">生活</div>
-        <div class="category-chip" onclick="setCategory('其它')">其它</div>
-      </div>
-
-      <!-- 高赞榜的二级来源筛选器 -->
-      <div class="sub-filter-container" id="sourceFilterContainer">
-        <div class="sub-filter-chip active" data-source="全部" onclick="setSourceFilter('全部')">全部</div>
-        <div class="sub-filter-chip" data-source="anthropic" onclick="setSourceFilter('anthropic')">
-            <img class="source-icon" src="https://github.com/anthropics.png?s=40" alt="Anthropic">
-            Anthropic
-        </div>
-        <div class="sub-filter-chip" data-source="openai" onclick="setSourceFilter('openai')">
-            <img class="source-icon" src="https://github.com/openai.png?s=40" alt="OpenAI">
-            OpenAI
-        </div>
-        <div class="sub-filter-chip" data-source="huggingface" onclick="setSourceFilter('huggingface')">
-            <img class="source-icon" src="https://github.com/huggingface.png?s=40" alt="HuggingFace">
-            HuggingFace
-        </div>
-        <div class="sub-filter-chip" data-source="superpowers" onclick="setSourceFilter('superpowers')">
-            <img class="source-icon" src="https://github.com/obra.png?s=40" alt="Superpowers">
-            Superpowers
-        </div>
-        <div class="sub-filter-chip" data-source="composio" onclick="setSourceFilter('composio')">
-            <img class="source-icon" src="https://github.com/ComposioHQ.png?s=40" alt="Composio">
-            Composio
-        </div>
-      </div>
-
-      <div class="skill-list" id="skillList">
-        <div class="loader-container" id="loader">
-          <div class="loader"></div>
-          <div style="font-size: 11px; opacity: 0.6">正在抓取官方技能库...</div>
-        </div>
+      <!-- 第二行：标签 + Agent 选择 + 范围选择 -->
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <select id="agentTypeSelect" class="lang-select" style="flex: 1;" onchange="onAgentTypeChange()">
+          <option value="antigravity">Antigravity (Gemini)</option>
+          <option value="claude">Claude</option>
+          <option value="codex">Codex</option>
+          <option value="opencode">Open Code</option>
+        </select>
+        <select id="scopeSelect" class="lang-select" style="flex: 1;" onchange="onScopeChange()">
+          <option value="global">全局安装 (Home)</option>
+          <option value="project">项目安装 (Workspace)</option>
+        </select>
       </div>
     </div>
 
-    <!-- 动态变量注入 -->
-    <script>
-      const vscode = acquireVsCodeApi();
-      const oldState = vscode.getState() || {};
-      let currentCategory = oldState.category || "全部";
-      let currentSourceFilter = oldState.source || "全部";
-      let currentTab = oldState.tab || "available";
-      let currentLanguage = "/*{{currentLang}}*/";
-      let showAiCategories = "/*{{showAiCategories}}*/" === "true";
-      let currentAgentType = "/*{{currentAgentType}}*/";
-      let currentScope = "/*{{currentScope}}*/";
+    <!-- 翻译进度条 -->
+    <div id="translationProgress" class="translation-progress" style="display: none;">
+      <div class="progress-info">
+        <span>正在智能分类及翻译技能列表...</span>
+        <span id="progressPercent">0%</span>
+      </div>
+      <div class="progress-track">
+        <div id="progressFill" class="progress-fill"></div>
+      </div>
+    </div>
 
-      let skills = [
-        /*{{skillsData}}*/
-      ];
-    </script>
-    <!-- 业务逻辑脚本 -->
-    <script src="{{jsUri}}"></script>
-  </body>
+    <div class="tabs">
+      <div class="tab active" id="tabAvailable" onclick="setTab('available')">
+        发现技能 <span class="tab-count" id="countAvailable">0</span>
+      </div>
+      <div class="tab" id="tabInstalled" onclick="setTab('installed')">
+        已安装 <span class="tab-count" id="countInstalled">0</span>
+      </div>
+    </div>
+
+    <div class="categories" id="categories">
+      <div class="category-chip active" onclick="setCategory('全部')">全部</div>
+      <div class="category-chip" onclick="setCategory('高赞')">✓ 高赞榜</div>
+      <div class="category-chip ai-category" onclick="setCategory('编程')">编程</div>
+      <div class="category-chip ai-category" onclick="setCategory('办公')">办公</div>
+      <div class="category-chip ai-category" onclick="setCategory('创意')">创意</div>
+      <div class="category-chip ai-category" onclick="setCategory('分析')">分析</div>
+      <div class="category-chip ai-category" onclick="setCategory('生活')">生活</div>
+    </div>
+
+    <!-- 高赞榜的二级来源筛选器（动态生成） -->
+    <div class="sub-filter-container" id="sourceFilterContainer">
+      <div class="sub-filter-chip active" data-source="全部" onclick="setSourceFilter('全部')">全部</div>
+      <!-- 其余筛选芯片由 JS 动态生成 -->
+    </div>
+
+    <div class="skill-list" id="skillList">
+      <div class="loader-container" id="loader">
+        <div class="loader"></div>
+        <div style="font-size: 11px; opacity: 0.6">正在抓取官方技能库...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 动态变量注入 -->
+  <script>
+    const vscode = acquireVsCodeApi();
+    const oldState = vscode.getState() || {};
+    let currentCategory = oldState.category || "全部";
+    let currentSourceFilter = oldState.source || "全部";
+    let currentTab = oldState.tab || "available";
+    let currentLanguage = "/*{{currentLang}}*/";
+    let showAiCategories = "/*{{showAiCategories}}*/" === "true";
+    let currentAgentType = "/*{{currentAgentType}}*/";
+    let currentScope = "/*{{currentScope}}*/";
+
+    let skills = [/*{{skillsData}}*/];
+
+    let sourceConfigs = [/*{{sourceConfigs}}*/];
+  </script>
+  <!-- 业务逻辑脚本 -->
+  <script src="{{jsUri}}"></script>
+</body>
+
 </html>
