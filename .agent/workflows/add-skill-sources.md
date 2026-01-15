@@ -2,11 +2,11 @@
 description: 如何向技能市场添加新的 GitHub 技能源
 ---
 
-本工作流指导开发者如何向 Antigravity 技能市场添加新的官方或第三方 GitHub 技能源（例如 OpenAI, Google 等）。
+本工作流指导开发者如何向技能市场添加新的官方或第三方 GitHub 技能源（例如 OpenAI, Google 等）。
 
 ### 1. 定义技能源类
 
-在 [GithubSkillSource.ts](file:///e:/Document/open_skill_Marketplace/src/services/GithubSkillSource.ts) 中创建一个继承自 `BaseSkillSource` 的新类。
+在 [src/services/GithubSkillSource.ts](file:///src/services/GithubSkillSource.ts) 中创建一个继承自 `BaseSkillSource` 的新类。
 
 **基础模版：**
 
@@ -20,7 +20,8 @@ export class NewSkillSource extends BaseSkillSource {
   protected defaultBranch = "main"; // 或 'master'
 
   async fetchSkills(): Promise<Skill[]> {
-    // 实现抓取逻辑
+    // 您可以根据仓库结构重用 fetchSkills 实现
+    // 逻辑通常包含：获取目录 -> 解析元数据 -> 返回 Skill[]
   }
 }
 ```
@@ -30,45 +31,26 @@ export class NewSkillSource extends BaseSkillSource {
 根据仓库结构实现目录遍历逻辑：
 
 - **单目录结构**：参考 `AnthropicSkillSource`。
-- **多目录结构**：参考 `OpenAISkillSource`（通过数组遍历多个路径）。
-- **根目录结构**：参考 `ComposioSkillSource`（技能直接在根目录下）。
+- **多目录结构**：参考 `OpenAISkillSource`。
+- **根目录结构**：参考 `ComposioSkillSource`。
 
 **关键步骤：**
 
 1. 使用 `this.fetchGithubApi` 获取目录列表。
 2. 对每个子目录调用 `this.fetchSkillMetadata(路径, 目录名)`。
-3. 将结果映射为 `Skill` 对象，确保包含：
-   - `icon`: 该源的特征图标（如 "O" 代表 OpenAI）。
-   - `colors`: 对应的品牌颜色。
-   - `source`: 唯一的源标识符。
-   - `skillPath`: 在仓库中的相对路径。
-   - `branch`: 仓库分支（`this.defaultBranch`）。
+3. 将结果映射为 `Skill` 对象，确保包含正确的 `icon`, `colors`, `source`, `skillPath` 等字段。
 
 ### 3. 注册技能源
 
-在 `GithubSkillSource` 类的 `sources` 数组中实例化并添加你的新类：
+在 `src/services/GithubSkillSource.ts` 的 `GithubSkillSource` 类的 `sources` 数组中实例化并添加你的新类。
 
-```typescript
-export class GithubSkillSource {
-  private sources: BaseSkillSource[] = [
-    new AnthropicSkillSource(),
-    new OpenAISkillSource(),
-    new HuggingFaceSkillSource(),
-    new SuperpowersSkillSource(),
-    new ComposioSkillSource(),
-    new NewSkillSource(), // 在此添加
-  ];
-  // ...
-}
-```
+### 4. 在 UI 中注册二级筛选器
 
-### 4. (可选) 添加内置种子数据
+由于 UI 已进行分层重构，请按顺序完成以下修改：
 
-为了保证在 API 受限时仍能看到该源的代表性技能，可以在 `GithubSkillSource` 类的 `seedSkills` 数组中添加该源的技能条目。**注意：种子数据必须包含 `branch` 字段。**
+#### A. 修改 [marketplace.html](file:///resources/marketplace.html)
 
-### 5. 在 UI 中注册二级筛选器
-
-打开 [marketplace.html](file:///e:/Document/open_skill_Marketplace/resources/marketplace.html)，在 `sourceFilterContainer` 中添加新源的筛选芯片：
+在 `sourceFilterContainer` 中添加新源的筛选芯片：
 
 ```html
 <div
@@ -76,11 +58,14 @@ export class GithubSkillSource {
   data-source="newsource"
   onclick="setSourceFilter('newsource')"
 >
-  <span class="source-icon" style="background: [品牌色];"></span> [源名称]
+  <img class="source-icon" src="[图标URL，如 GitHub 头像]" alt="[源名称]" />
+  [源名称]
 </div>
 ```
 
-并在 `createSkillCard` 函数的 `sourceMap` 对象中添加名称映射：
+#### B. 修改 [marketplace.js](file:///resources/marketplace.js)
+
+在 `createSkillCard` 函数的 `sourceMap` 对象中添加名称映射：
 
 ```javascript
 const sourceMap = {

@@ -4,7 +4,7 @@ description: 如何向技能市场添加对新 Agent 工具的支持
 
 # 添加新 Agent 支持工作流
 
-本工作流指导开发者如何为“技能市场”增加对新的 Agent 工具（如 Windsurf, Cody, Cline 等）的安装分发支持。
+本工作流指导开发者如何为技能市场增加对新的 Agent 工具（如 Windsurf, Cody, Cline 等）的安装分发支持。
 
 ## ⚠️ 核心前置要求：深度调研
 
@@ -86,9 +86,9 @@ export class CursorAgent implements IAgent {
 
 ## 步骤 4：UI 层同步（可选）
 
-### 4.1 修改 `resources/marketplace.html`
+### 4.1 修改 [resources/marketplace.html](file:///resources/marketplace.html)
 
-- 找到 `#agentSelector` 元素。
+- 找到 `#agentTypeSelect` 元素。
 - 增加对应的 `<option value="your-id">Your Name</option>`，确保与 `package.json` 中的枚举一致。
 
 ---
@@ -97,4 +97,4 @@ export class CursorAgent implements IAgent {
 
 1.  **编译检查**：运行 `npm run compile` 确保无类型错误。
 2.  **路径测试**：在插件内切换到新 Agent，尝试安装一个技能，检查本地目标目录是否正确创建并下载了文件。
-3.  **打包**：执行 `.\package_extension.ps1` 生成 VSIX。
+3.  **打包**：执行 `npm run package` 或相关的打包脚本生成 VSIX。

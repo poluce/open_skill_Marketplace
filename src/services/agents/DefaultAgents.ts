@@ -3,7 +3,7 @@ import * as path from 'path';
 
 export class AntigravityAgent implements IAgent {
     id = 'antigravity';
-    name = 'Antigravity';
+    name = 'Antigravity (Gemini)';
 
     getGlobalPath(home: string): string {
         return path.join(home, '.gemini', 'antigravity', 'skills');

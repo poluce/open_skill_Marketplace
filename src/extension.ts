@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { SkillMarketplaceViewProvider } from './providers/MarketplaceProvider';
 
 export function activate(context: vscode.ExtensionContext) {
-	console.log('Antigravity 技能市场已激活（重构版）！');
+	console.log('技能市场已激活（重构版）！');
 
 	const provider = new SkillMarketplaceViewProvider(context.extensionUri);
 
@@ -29,5 +29,5 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-	console.log('Antigravity 技能市场已停用。');
+	console.log('技能市场已停用。');
 }
