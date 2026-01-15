@@ -8,6 +8,8 @@ import { Skill } from '../models/Skill';
 const RAW_GITHUB_BASE = 'https://raw.githubusercontent.com';
 const GITHUB_API_BASE = 'https://api.github.com';
 
+import { AgentManager } from './AgentManager';
+
 /**
  * 技能安装服务
  * 负责将技能从 GitHub 下载并安装到本地目录
@@ -19,8 +21,13 @@ export class SkillInstaller {
      */
     getInstallPath(): string {
         const config = vscode.workspace.getConfiguration('antigravity');
-        const agentType = config.get<string>('agentType', 'antigravity');
+        const agentId = config.get<string>('agentType', 'antigravity');
         const scope = config.get<string>('installScope', 'global');
+
+        const agent = AgentManager.getInstance().getAgent(agentId);
+        if (!agent) {
+            throw new Error(`未知的 Agent 类型: ${agentId}`);
+        }
 
         // 优先锁定基准目录
         let basePath = '';
@@ -34,53 +41,31 @@ export class SkillInstaller {
             basePath = os.homedir();
         }
 
-        // 根据 Agent 和 Scope 派生最终路径
-        let finalPath = '';
-        switch (agentType) {
-            case 'antigravity':
-                finalPath = scope === 'project' 
-                    ? path.join(basePath, '.agent', 'skills')
-                    : path.join(basePath, '.gemini', 'antigravity', 'skills');
-                break;
-            case 'claude':
-                finalPath = scope === 'project'
-                    ? path.join(basePath, '.claude', 'skills')
-                    : path.join(basePath, '.claude', 'skills');
-                break;
-            case 'codex':
-                finalPath = scope === 'project'
-                    ? path.join(basePath, '.codex', 'skills')
-                    : path.join(basePath, '.codex', 'skills');
-                break;
-            case 'opencode':
-                finalPath = scope === 'project'
-                    ? path.join(basePath, '.opencode', 'skill')
-                    : path.join(basePath, '.config', 'opencode', 'skill');
-                break;
-            default:
-                finalPath = path.join(basePath, '.gemini', 'skills');
-        }
+        // 根据 Agent 策略动态获取路径
+        const finalPath = scope === 'project' 
+            ? agent.getProjectPath(basePath)
+            : agent.getGlobalPath(basePath);
 
         // 全局校验：如果目录不存在，提示用户安装 Agent
         if (scope === 'global' && !fs.existsSync(finalPath)) {
             // 注意：对于 Open Code 这种深层路径，可能需要检查其父目录
-            const checkPath = agentType === 'opencode' ? path.dirname(finalPath) : finalPath;
+            const checkPath = agentId === 'opencode' ? path.dirname(finalPath) : finalPath;
             if (!fs.existsSync(checkPath)) {
-                throw new Error(`未检测到 ${this.getAgentName(agentType)} 的环境，请先安装该 Agent 工具。`);
+                throw new Error(`未检测到 ${agent.name} 的环境，请先安装该 Agent 工具。`);
             }
+        }
+
+        // 执行 Agent 特有的进一步验证 (可选)
+        if (agent.validate) {
+            agent.validate(finalPath);
         }
 
         return finalPath;
     }
 
     private getAgentName(type: string): string {
-        const names: Record<string, string> = {
-            'antigravity': 'Antigravity',
-            'claude': 'Claude Code CLI',
-            'codex': 'Codex CLI',
-            'opencode': 'Open Code'
-        };
-        return names[type] || type;
+        const agent = AgentManager.getInstance().getAgent(type);
+        return agent ? agent.name : type;
     }
 
     /**
