@@ -20,17 +20,3 @@ export interface ClaudeSkill {
     /** 标识为高赞技能 */
     isFeatured: true;
 }
-
-/**
- * 统一技能类型（兼容本地 mock 和高赞技能）
- */
-export interface UnifiedSkill {
-    id: string | number;
-    name: string;
-    desc: string;
-    category: string;
-    icon: string;
-    colors: [string, string];
-    isFeatured?: boolean;
-    repoLink?: string;
-}

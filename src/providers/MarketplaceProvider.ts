@@ -18,7 +18,7 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
     constructor(
         private readonly _extensionUri: vscode.Uri,
     ) {
-        this._githubSource = new GithubSkillSource();
+        this._githubSource = new GithubSkillSource(this._extensionUri);
         this._installer = new SkillInstaller();
         this._translator = new TranslationService();
     }
@@ -284,6 +284,10 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
         const accentColor = config.get<string>('accentColor', '#8A2BE2');
         const glowColor = accentColor.replace('rgb', 'rgba').replace(')', ', 0.3)');
 
+        // 生成外部资源 URI
+        const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'resources', 'marketplace.css'));
+        const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'resources', 'marketplace.js'));
+
         // 读取 HTML 模板文件
         const htmlPath = path.join(this._extensionUri.fsPath, 'resources', 'marketplace.html');
         let html = fs.readFileSync(htmlPath, 'utf8');
@@ -294,6 +298,8 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
         const currentAgentType = config.get<string>('agentType', 'antigravity');
         const currentScope = config.get<string>('installScope', 'global');
 
+        html = html.replace('{{cssUri}}', cssUri.toString());
+        html = html.replace('{{jsUri}}', jsUri.toString());
         html = html.replace('{{accentColor}}', accentColor);
         html = html.replace('{{accentGlow}}', glowColor);
         html = html.replace('[/*{{skillsData}}*/]', JSON.stringify(this._allSkills));

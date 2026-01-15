@@ -1,4 +1,5 @@
 import * as https from 'https';
+import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -8,6 +9,20 @@ import { Skill } from '../models/Skill';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 const RAW_GITHUB_BASE = 'https://raw.githubusercontent.com';
+
+/**
+ * GitHub API 目录内容响应类型
+ */
+interface GithubContentItem {
+    name: string;
+    path: string;
+    type: 'file' | 'dir';
+}
+
+/**
+ * HTTP 请求头类型
+ */
+type HttpHeaders = Record<string, string>;
 
 /**
  * 技能源抽象基类
@@ -31,7 +46,7 @@ export abstract class BaseSkillSource {
             const config = vscode.workspace.getConfiguration('antigravity');
             const token = config.get<string>('githubToken', '');
 
-            const headers: any = {
+            const headers: HttpHeaders = {
                 'User-Agent': 'VSCode-Antigravity-SkillMarketplace',
                 'Accept': 'application/vnd.github.v3+json'
             };
@@ -44,9 +59,9 @@ export abstract class BaseSkillSource {
                 headers
             };
 
-            https.get(url, options, (res: any) => {
+            https.get(url, options, (res: http.IncomingMessage) => {
                 let data = '';
-                res.on('data', (chunk: any) => data += chunk);
+                res.on('data', (chunk: Buffer | string) => data += chunk);
                 res.on('end', () => {
                     if (res.statusCode === 200) {
                         resolve(data);
@@ -67,9 +82,9 @@ export abstract class BaseSkillSource {
      */
     protected fetchRawContent(url: string): Promise<string> {
         return new Promise((resolve, reject) => {
-            https.get(url, (res: any) => {
+            https.get(url, (res: http.IncomingMessage) => {
                 let data = '';
-                res.on('data', (chunk: any) => data += chunk);
+                res.on('data', (chunk: Buffer | string) => data += chunk);
                 res.on('end', () => {
                     if (res.statusCode === 200) {
                         resolve(data);
@@ -163,10 +178,10 @@ export class AnthropicSkillSource extends BaseSkillSource {
         try {
             const skillsPath = 'skills';
             const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents/${skillsPath}`);
-            const dirs = JSON.parse(dirContents).filter((item: any) => item.type === 'dir');
+            const dirs = JSON.parse(dirContents).filter((item: GithubContentItem) => item.type === 'dir');
             console.log(`Anthropic 发现 ${dirs.length} 个潜在技能目录`);
 
-            const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadata(skillsPath, dir.name));
+            const skillPromises = dirs.map((dir: GithubContentItem) => this.fetchSkillMetadata(skillsPath, dir.name));
             const results = await Promise.all(skillPromises);
 
             const finalSkills = results
@@ -213,10 +228,10 @@ export class OpenAISkillSource extends BaseSkillSource {
         const fetchResults = await Promise.all(this.categories.map(async (path) => {
             try {
                 const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents/${path}`);
-                const dirs = JSON.parse(dirContents).filter((item: any) => item.type === 'dir');
+                const dirs = JSON.parse(dirContents).filter((item: GithubContentItem) => item.type === 'dir');
                 console.log(`OpenAI [${path}] 发现 ${dirs.length} 个潜在技能目录`);
 
-                const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadata(path, dir.name));
+                const skillPromises = dirs.map((dir: GithubContentItem) => this.fetchSkillMetadata(path, dir.name));
                 const results = await Promise.all(skillPromises);
 
                 return results
@@ -262,10 +277,10 @@ export class HuggingFaceSkillSource extends BaseSkillSource {
         try {
             const skillsPath = 'skills';
             const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents/${skillsPath}`);
-            const dirs = JSON.parse(dirContents).filter((item: any) => item.type === 'dir');
+            const dirs = JSON.parse(dirContents).filter((item: GithubContentItem) => item.type === 'dir');
             console.log(`HuggingFace 发现 ${dirs.length} 个潜在技能目录`);
 
-            const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadata(skillsPath, dir.name));
+            const skillPromises = dirs.map((dir: GithubContentItem) => this.fetchSkillMetadata(skillsPath, dir.name));
             const results = await Promise.all(skillPromises);
 
             const finalSkills = results
@@ -309,10 +324,10 @@ export class SuperpowersSkillSource extends BaseSkillSource {
         try {
             const skillsPath = 'skills';
             const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents/${skillsPath}`);
-            const dirs = JSON.parse(dirContents).filter((item: any) => item.type === 'dir');
+            const dirs = JSON.parse(dirContents).filter((item: GithubContentItem) => item.type === 'dir');
             console.log(`Superpowers 发现 ${dirs.length} 个潜在技能目录`);
 
-            const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadata(skillsPath, dir.name));
+            const skillPromises = dirs.map((dir: GithubContentItem) => this.fetchSkillMetadata(skillsPath, dir.name));
             const results = await Promise.all(skillPromises);
 
             const finalSkills = results
@@ -361,10 +376,10 @@ export class ComposioSkillSource extends BaseSkillSource {
             // 直接获取根目录
             const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents`);
             const dirs = JSON.parse(dirContents)
-                .filter((item: any) => item.type === 'dir' && !this.excludeDirs.includes(item.name));
+                .filter((item: GithubContentItem) => item.type === 'dir' && !this.excludeDirs.includes(item.name));
             console.log(`Composio 发现 ${dirs.length} 个潜在技能目录`);
 
-            const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadataRoot(dir.name));
+            const skillPromises = dirs.map((dir: GithubContentItem) => this.fetchSkillMetadataRoot(dir.name));
             const results = await Promise.all(skillPromises);
 
             const finalSkills = results
@@ -436,83 +451,23 @@ export class GithubSkillSource {
         new ComposioSkillSource()
     ];
 
-    private seedSkills: Skill[] = [
-        {
-            id: 'anthropic:algorithmic-art',
-            name: 'Algorithmic Art',
-            desc: '使用代码生成精美的算法艺术图。',
-            category: '创意',
-            icon: '✓',
-            colors: ['#6366f1', '#8b5cf6'],
-            isFeatured: true,
-            repoLink: 'https://github.com/anthropics/skills/tree/main/skills/algorithmic-art',
-            repoOwner: 'anthropics',
-            repoName: 'skills',
-            skillPath: 'skills/algorithmic-art',
-            source: 'anthropic',
-            branch: 'main'
-        },
-        {
-            id: 'openai:gh-address-comments',
-            name: 'Address Comments',
-            desc: '自动分析并回复 GitHub PR 中的评审意见。',
-            category: '编程',
-            icon: 'O',
-            colors: ['#10a37f', '#108060'],
-            isFeatured: true,
-            repoLink: 'https://github.com/openai/skills/tree/main/skills/.curated/gh-address-comments',
-            repoOwner: 'openai',
-            repoName: 'skills',
-            skillPath: 'skills/.curated/gh-address-comments',
-            source: 'openai',
-            branch: 'main'
-        },
-        {
-            id: 'huggingface:hugging-face-datasets',
-            name: 'Hugging Face Datasets',
-            desc: '在 Hugging Face Hub 上创建和管理数据集。支持 SQL 查询和转换。',
-            category: '分析',
-            icon: 'H',
-            colors: ['#FFD21E', '#FF9D00'],
-            isFeatured: true,
-            repoLink: 'https://github.com/huggingface/skills/tree/main/skills/hugging-face-datasets',
-            repoOwner: 'huggingface',
-            repoName: 'skills',
-            skillPath: 'skills/hugging-face-datasets',
-            source: 'huggingface',
-            branch: 'main'
-        },
-        {
-            id: 'superpowers:brainstorming',
-            name: 'Brainstorming',
-            desc: '将创意想法转化为完整的设计规格，通过协作式对话探索需求和方案。',
-            category: '编程',
-            icon: 'S',
-            colors: ['#FF6B35', '#F7931E'],
-            isFeatured: true,
-            repoLink: 'https://github.com/obra/superpowers/tree/main/skills/brainstorming',
-            repoOwner: 'obra',
-            repoName: 'superpowers',
-            skillPath: 'skills/brainstorming',
-            source: 'superpowers',
-            branch: 'main'
-        },
-        {
-            id: 'composio:mcp-builder',
-            name: 'MCP Builder',
-            desc: '创建高质量的 MCP 服务器，使 LLM 能够通过精心设计的工具与外部服务交互。',
-            category: '编程',
-            icon: 'C',
-            colors: ['#7C3AED', '#A855F7'],
-            isFeatured: true,
-            repoLink: 'https://github.com/ComposioHQ/awesome-claude-skills/tree/master/mcp-builder',
-            repoOwner: 'ComposioHQ',
-            repoName: 'awesome-claude-skills',
-            skillPath: 'mcp-builder',
-            source: 'composio',
-            branch: 'master'
+    constructor(private readonly _extensionUri?: vscode.Uri) {}
+
+    private getSeedSkills(): Skill[] {
+        if (!this._extensionUri) {
+            return [];
         }
-    ];
+
+        try {
+            const seedPath = path.join(this._extensionUri.fsPath, 'resources', 'seed-skills.json');
+            if (fs.existsSync(seedPath)) {
+                return JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+            }
+        } catch (e) {
+            console.error('加载种子技能失败:', e);
+        }
+        return [];
+    }
 
     /**
      * 获取合并后的高赞技能列表
@@ -550,7 +505,7 @@ export class GithubSkillSource {
         }
 
         console.warn('所有请求和缓存均失效，加载内置种子数据');
-        return { skills: this.seedSkills, isRateLimited: true };
+        return { skills: this.getSeedSkills(), isRateLimited: true };
     }
 
     private getCachePath(): string {
@@ -588,12 +543,5 @@ export class GithubSkillSource {
             console.error('加载缓存失败:', e);
         }
         return [];
-    }
-
-    /**
-     * 兼容性转换逻辑
-     */
-    toUnifiedSkill(skill: Skill): Skill {
-        return skill;
     }
 }

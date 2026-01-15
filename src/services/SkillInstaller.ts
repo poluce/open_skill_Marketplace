@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as https from 'https';
+import * as http from 'http';
 import * as os from 'os';
 import { Skill } from '../models/Skill';
 
@@ -200,7 +201,7 @@ export class SkillInstaller {
             const config = vscode.workspace.getConfiguration('antigravity');
             const token = config.get<string>('githubToken', '');
 
-            const headers: any = {
+            const headers: Record<string, string> = {
                 'User-Agent': 'VSCode-Antigravity-SkillMarketplace',
                 'Accept': 'application/vnd.github.v3+json'
             };
@@ -213,9 +214,9 @@ export class SkillInstaller {
                 headers
             };
 
-            https.get(url, options, (res) => {
+            https.get(url, options, (res: http.IncomingMessage) => {
                 let data = '';
-                res.on('data', chunk => data += chunk);
+                res.on('data', (chunk: Buffer | string) => data += chunk);
                 res.on('end', () => {
                     if (res.statusCode === 200) {
                         try {
@@ -249,7 +250,7 @@ export class SkillInstaller {
             const branch = skill.branch || 'main';
             const url = `${RAW_GITHUB_BASE}/${skill.repoOwner}/${skill.repoName}/${branch}/${filePath}`;
 
-            https.get(url, (res) => {
+            https.get(url, (res: http.IncomingMessage) => {
                 if (res.statusCode === 200) {
                     const writeStream = fs.createWriteStream(targetPath);
                     res.pipe(writeStream);
