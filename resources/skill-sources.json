@@ -9,7 +9,10 @@
       "skillsPath": "skills",
       "pathType": "subdir",
       "icon": "✓",
-      "colors": ["#6366f1", "#8b5cf6"],
+      "colors": [
+        "#6366f1",
+        "#8b5cf6"
+      ],
       "iconUrl": "https://github.com/anthropics.png?s=40"
     },
     {
@@ -18,10 +21,17 @@
       "owner": "openai",
       "repo": "skills",
       "branch": "main",
-      "skillsPath": ["skills/.curated", "skills/.experimental", "skills/.system"],
+      "skillsPath": [
+        "skills/.curated",
+        "skills/.experimental",
+        "skills/.system"
+      ],
       "pathType": "subdir",
       "icon": "O",
-      "colors": ["#10a37f", "#108060"],
+      "colors": [
+        "#10a37f",
+        "#108060"
+      ],
       "iconUrl": "https://github.com/openai.png?s=40"
     },
     {
@@ -33,7 +43,10 @@
       "skillsPath": "skills",
       "pathType": "subdir",
       "icon": "H",
-      "colors": ["#FFD21E", "#FF9D00"],
+      "colors": [
+        "#FFD21E",
+        "#FF9D00"
+      ],
       "iconUrl": "https://github.com/huggingface.png?s=40"
     },
     {
@@ -45,7 +58,10 @@
       "skillsPath": "skills",
       "pathType": "subdir",
       "icon": "S",
-      "colors": ["#FF6B35", "#F7931E"],
+      "colors": [
+        "#FF6B35",
+        "#F7931E"
+      ],
       "iconUrl": "https://github.com/obra.png?s=40"
     },
     {
@@ -56,10 +72,32 @@
       "branch": "master",
       "skillsPath": "",
       "pathType": "root",
-      "excludeDirs": [".claude-plugin", ".github", "template-skill"],
+      "excludeDirs": [
+        ".claude-plugin",
+        ".github",
+        "template-skill"
+      ],
       "icon": "C",
-      "colors": ["#7C3AED", "#A855F7"],
+      "colors": [
+        "#7C3AED",
+        "#A855F7"
+      ],
       "iconUrl": "https://github.com/ComposioHQ.png?s=40"
+    },
+    {
+      "id": "obsidian",
+      "displayName": "Obsidian",
+      "owner": "kepano",
+      "repo": "obsidian-skills",
+      "branch": "main",
+      "skillsPath": "skills",
+      "pathType": "subdir",
+      "icon": "🟣",
+      "colors": [
+        "#7C3AED",
+        "#A855F7"
+      ],
+      "iconUrl": "https://github.com/kepano.png?s=40"
     }
   ]
 }

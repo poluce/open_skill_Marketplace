@@ -28,6 +28,7 @@
 | HuggingFace | [huggingface/skills](https://github.com/huggingface/skills)                             | main   | HuggingFace 官方技能库   |
 | Superpowers | [obra/superpowers](https://github.com/obra/superpowers)                                 | main   | 高质量开发工作流技能     |
 | Composio    | [ComposioHQ/awesome-claude-skills](https://github.com/ComposioHQ/awesome-claude-skills) | master | 社区贡献的多样化技能集合 |
+| Obsidian    | [kepano/obsidian-skills](https://github.com/kepano/obsidian-skills)                     | main   | Obsidian 官方提供的代理技能 |
 
 ## 插件设置
 
