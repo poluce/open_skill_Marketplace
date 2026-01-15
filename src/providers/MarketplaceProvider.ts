@@ -18,7 +18,7 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
     constructor(
         private readonly _extensionUri: vscode.Uri,
     ) {
-        this._githubSource = new GithubSkillSource(this._extensionUri);
+        this._githubSource = new GithubSkillSource();
         this._installer = new SkillInstaller();
         this._translator = new TranslationService();
     }

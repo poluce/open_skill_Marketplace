@@ -451,23 +451,7 @@ export class GithubSkillSource {
         new ComposioSkillSource()
     ];
 
-    constructor(private readonly _extensionUri?: vscode.Uri) {}
-
-    private getSeedSkills(): Skill[] {
-        if (!this._extensionUri) {
-            return [];
-        }
-
-        try {
-            const seedPath = path.join(this._extensionUri.fsPath, 'resources', 'seed-skills.json');
-            if (fs.existsSync(seedPath)) {
-                return JSON.parse(fs.readFileSync(seedPath, 'utf8'));
-            }
-        } catch (e) {
-            console.error('加载种子技能失败:', e);
-        }
-        return [];
-    }
+    constructor() {}
 
     /**
      * 获取合并后的高赞技能列表
@@ -504,8 +488,8 @@ export class GithubSkillSource {
             return { skills: cached, isRateLimited: true }; // 使用缓存也标记为受限
         }
 
-        console.warn('所有请求和缓存均失效，加载内置种子数据');
-        return { skills: this.getSeedSkills(), isRateLimited: true };
+        console.warn('所有请求和缓存均失效');
+        return { skills: [], isRateLimited: true };
     }
 
     private getCachePath(): string {
