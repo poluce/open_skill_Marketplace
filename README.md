@@ -29,6 +29,10 @@
 | Superpowers | [obra/superpowers](https://github.com/obra/superpowers)                                 | main   | 高质量开发工作流技能     |
 | Composio    | [ComposioHQ/awesome-claude-skills](https://github.com/ComposioHQ/awesome-claude-skills) | master | 社区贡献的多样化技能集合 |
 | Obsidian    | [kepano/obsidian-skills](https://github.com/kepano/obsidian-skills)                     | main   | Obsidian 官方提供的代理技能 |
+| ClaudeKit   | [mrgoonie/claudekit-skills](https://github.com/mrgoonie/claudekit-skills)               | main   | Claude 能力扩展工具包     |
+| Scientific  | [K-Dense-AI/claude-scientific-skills](https://github.com/K-Dense-AI/claude-scientific-skills) | main   | 专注于科学计算与分析的技能 |
+| Bear2u      | [bear2u/my-skills](https://github.com/bear2u/my-skills)                               | master | 个人开发的实用工具技能集   |
+| n8n         | [czlonkowski/n8n-skills](https://github.com/czlonkowski/n8n-skills)                   | main   | n8n 自动化工作流集成技能   |
 
 ## 插件设置
 

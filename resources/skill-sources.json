@@ -98,6 +98,66 @@
         "#A855F7"
       ],
       "iconUrl": "https://github.com/kepano.png?s=40"
+    },
+    {
+      "id": "claudekit",
+      "displayName": "ClaudeKit",
+      "owner": "mrgoonie",
+      "repo": "claudekit-skills",
+      "branch": "main",
+      "skillsPath": ".claude/skills",
+      "pathType": "subdir",
+      "icon": "🛠️",
+      "colors": [
+        "#3B82F6",
+        "#2563EB"
+      ],
+      "iconUrl": "https://github.com/mrgoonie.png?s=40"
+    },
+    {
+      "id": "scientific",
+      "displayName": "Scientific",
+      "owner": "K-Dense-AI",
+      "repo": "claude-scientific-skills",
+      "branch": "main",
+      "skillsPath": "scientific-skills",
+      "pathType": "subdir",
+      "icon": "🔬",
+      "colors": [
+        "#10B981",
+        "#059669"
+      ],
+      "iconUrl": "https://github.com/K-Dense-AI.png?s=40"
+    },
+    {
+      "id": "bear2u",
+      "displayName": "Bear2u",
+      "owner": "bear2u",
+      "repo": "my-skills",
+      "branch": "master",
+      "skillsPath": "skills",
+      "pathType": "subdir",
+      "icon": "🐻",
+      "colors": [
+        "#F59E0B",
+        "#D97706"
+      ],
+      "iconUrl": "https://github.com/bear2u.png?s=40"
+    },
+    {
+      "id": "n8n",
+      "displayName": "n8n",
+      "owner": "czlonkowski",
+      "repo": "n8n-skills",
+      "branch": "main",
+      "skillsPath": "skills",
+      "pathType": "subdir",
+      "icon": "🔗",
+      "colors": [
+        "#EC4899",
+        "#DB2777"
+      ],
+      "iconUrl": "https://github.com/czlonkowski.png?s=40"
     }
   ]
 }
