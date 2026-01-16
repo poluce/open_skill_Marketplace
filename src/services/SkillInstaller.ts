@@ -2,11 +2,14 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as https from 'https';
+import * as http from 'http';
 import * as os from 'os';
 import { Skill } from '../models/Skill';
 
 const RAW_GITHUB_BASE = 'https://raw.githubusercontent.com';
 const GITHUB_API_BASE = 'https://api.github.com';
+
+import { AgentManager } from './AgentManager';
 
 /**
  * 技能安装服务
@@ -19,8 +22,13 @@ export class SkillInstaller {
      */
     getInstallPath(): string {
         const config = vscode.workspace.getConfiguration('antigravity');
-        const agentType = config.get<string>('agentType', 'antigravity');
+        const agentId = config.get<string>('agentType', 'antigravity');
         const scope = config.get<string>('installScope', 'global');
+
+        const agent = AgentManager.getInstance().getAgent(agentId);
+        if (!agent) {
+            throw new Error(`未知的 Agent 类型: ${agentId}`);
+        }
 
         // 优先锁定基准目录
         let basePath = '';
@@ -34,53 +42,31 @@ export class SkillInstaller {
             basePath = os.homedir();
         }
 
-        // 根据 Agent 和 Scope 派生最终路径
-        let finalPath = '';
-        switch (agentType) {
-            case 'antigravity':
-                finalPath = scope === 'project' 
-                    ? path.join(basePath, '.agent', 'skills')
-                    : path.join(basePath, '.gemini', 'antigravity', 'skills');
-                break;
-            case 'claude':
-                finalPath = scope === 'project'
-                    ? path.join(basePath, '.claude', 'skills')
-                    : path.join(basePath, '.claude', 'skills');
-                break;
-            case 'codex':
-                finalPath = scope === 'project'
-                    ? path.join(basePath, '.codex', 'skills')
-                    : path.join(basePath, '.codex', 'skills');
-                break;
-            case 'opencode':
-                finalPath = scope === 'project'
-                    ? path.join(basePath, '.opencode', 'skill')
-                    : path.join(basePath, '.config', 'opencode', 'skill');
-                break;
-            default:
-                finalPath = path.join(basePath, '.gemini', 'skills');
-        }
+        // 根据 Agent 策略动态获取路径
+        const finalPath = scope === 'project'
+            ? agent.getProjectPath(basePath)
+            : agent.getGlobalPath(basePath);
 
         // 全局校验：如果目录不存在，提示用户安装 Agent
         if (scope === 'global' && !fs.existsSync(finalPath)) {
             // 注意：对于 Open Code 这种深层路径，可能需要检查其父目录
-            const checkPath = agentType === 'opencode' ? path.dirname(finalPath) : finalPath;
+            const checkPath = agentId === 'opencode' ? path.dirname(finalPath) : finalPath;
             if (!fs.existsSync(checkPath)) {
-                throw new Error(`未检测到 ${this.getAgentName(agentType)} 的环境，请先安装该 Agent 工具。`);
+                throw new Error(`未检测到 ${agent.name} 的环境，请先安装该 Agent 工具。`);
             }
+        }
+
+        // 执行 Agent 特有的进一步验证 (可选)
+        if (agent.validate) {
+            agent.validate(finalPath);
         }
 
         return finalPath;
     }
 
     private getAgentName(type: string): string {
-        const names: Record<string, string> = {
-            'antigravity': 'Antigravity',
-            'claude': 'Claude Code CLI',
-            'codex': 'Codex CLI',
-            'opencode': 'Open Code'
-        };
-        return names[type] || type;
+        const agent = AgentManager.getInstance().getAgent(type);
+        return agent ? agent.name : type;
     }
 
     /**
@@ -103,13 +89,13 @@ export class SkillInstaller {
      * 获取已安装的技能 ID 列表
      */
     getInstalledSkillIds(): string[] {
-        const installPath = this.getInstallPath();
-
-        if (!fs.existsSync(installPath)) {
-            return [];
-        }
-
         try {
+            const installPath = this.getInstallPath();
+
+            if (!fs.existsSync(installPath)) {
+                return [];
+            }
+
             const entries = fs.readdirSync(installPath, { withFileTypes: true });
             return entries
                 .filter(entry => entry.isDirectory())
@@ -119,7 +105,8 @@ export class SkillInstaller {
                     return fs.existsSync(skillMdPath);
                 })
                 .map(entry => this.getSkillIdFromDirName(entry.name));
-        } catch {
+        } catch (error) {
+            console.warn('获取已安装技能列表失败:', error instanceof Error ? error.message : String(error));
             return [];
         }
     }
@@ -215,7 +202,7 @@ export class SkillInstaller {
             const config = vscode.workspace.getConfiguration('antigravity');
             const token = config.get<string>('githubToken', '');
 
-            const headers: any = {
+            const headers: Record<string, string> = {
                 'User-Agent': 'VSCode-Antigravity-SkillMarketplace',
                 'Accept': 'application/vnd.github.v3+json'
             };
@@ -228,9 +215,9 @@ export class SkillInstaller {
                 headers
             };
 
-            https.get(url, options, (res) => {
+            https.get(url, options, (res: http.IncomingMessage) => {
                 let data = '';
-                res.on('data', chunk => data += chunk);
+                res.on('data', (chunk: Buffer | string) => data += chunk);
                 res.on('end', () => {
                     if (res.statusCode === 200) {
                         try {
@@ -264,7 +251,7 @@ export class SkillInstaller {
             const branch = skill.branch || 'main';
             const url = `${RAW_GITHUB_BASE}/${skill.repoOwner}/${skill.repoName}/${branch}/${filePath}`;
 
-            https.get(url, (res) => {
+            https.get(url, (res: http.IncomingMessage) => {
                 if (res.statusCode === 200) {
                     const writeStream = fs.createWriteStream(targetPath);
                     res.pipe(writeStream);

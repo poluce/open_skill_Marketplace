@@ -1,0 +1,163 @@
+{
+  "sources": [
+    {
+      "id": "anthropic",
+      "displayName": "Anthropic",
+      "owner": "anthropics",
+      "repo": "skills",
+      "branch": "main",
+      "skillsPath": "skills",
+      "pathType": "subdir",
+      "icon": "✓",
+      "colors": [
+        "#6366f1",
+        "#8b5cf6"
+      ],
+      "iconUrl": "https://github.com/anthropics.png?s=40"
+    },
+    {
+      "id": "openai",
+      "displayName": "OpenAI",
+      "owner": "openai",
+      "repo": "skills",
+      "branch": "main",
+      "skillsPath": [
+        "skills/.curated",
+        "skills/.experimental",
+        "skills/.system"
+      ],
+      "pathType": "subdir",
+      "icon": "O",
+      "colors": [
+        "#10a37f",
+        "#108060"
+      ],
+      "iconUrl": "https://github.com/openai.png?s=40"
+    },
+    {
+      "id": "huggingface",
+      "displayName": "HuggingFace",
+      "owner": "huggingface",
+      "repo": "skills",
+      "branch": "main",
+      "skillsPath": "skills",
+      "pathType": "subdir",
+      "icon": "H",
+      "colors": [
+        "#FFD21E",
+        "#FF9D00"
+      ],
+      "iconUrl": "https://github.com/huggingface.png?s=40"
+    },
+    {
+      "id": "superpowers",
+      "displayName": "Superpowers",
+      "owner": "obra",
+      "repo": "superpowers",
+      "branch": "main",
+      "skillsPath": "skills",
+      "pathType": "subdir",
+      "icon": "S",
+      "colors": [
+        "#FF6B35",
+        "#F7931E"
+      ],
+      "iconUrl": "https://github.com/obra.png?s=40"
+    },
+    {
+      "id": "composio",
+      "displayName": "Composio",
+      "owner": "ComposioHQ",
+      "repo": "awesome-claude-skills",
+      "branch": "master",
+      "skillsPath": "",
+      "pathType": "root",
+      "excludeDirs": [
+        ".claude-plugin",
+        ".github",
+        "template-skill"
+      ],
+      "icon": "C",
+      "colors": [
+        "#7C3AED",
+        "#A855F7"
+      ],
+      "iconUrl": "https://github.com/ComposioHQ.png?s=40"
+    },
+    {
+      "id": "obsidian",
+      "displayName": "Obsidian",
+      "owner": "kepano",
+      "repo": "obsidian-skills",
+      "branch": "main",
+      "skillsPath": "skills",
+      "pathType": "subdir",
+      "icon": "🟣",
+      "colors": [
+        "#7C3AED",
+        "#A855F7"
+      ],
+      "iconUrl": "https://github.com/kepano.png?s=40"
+    },
+    {
+      "id": "claudekit",
+      "displayName": "ClaudeKit",
+      "owner": "mrgoonie",
+      "repo": "claudekit-skills",
+      "branch": "main",
+      "skillsPath": ".claude/skills",
+      "pathType": "subdir",
+      "icon": "🛠️",
+      "colors": [
+        "#3B82F6",
+        "#2563EB"
+      ],
+      "iconUrl": "https://github.com/mrgoonie.png?s=40"
+    },
+    {
+      "id": "scientific",
+      "displayName": "Scientific",
+      "owner": "K-Dense-AI",
+      "repo": "claude-scientific-skills",
+      "branch": "main",
+      "skillsPath": "scientific-skills",
+      "pathType": "subdir",
+      "icon": "🔬",
+      "colors": [
+        "#10B981",
+        "#059669"
+      ],
+      "iconUrl": "https://github.com/K-Dense-AI.png?s=40"
+    },
+    {
+      "id": "bear2u",
+      "displayName": "Bear2u",
+      "owner": "bear2u",
+      "repo": "my-skills",
+      "branch": "master",
+      "skillsPath": "skills",
+      "pathType": "subdir",
+      "icon": "🐻",
+      "colors": [
+        "#F59E0B",
+        "#D97706"
+      ],
+      "iconUrl": "https://github.com/bear2u.png?s=40"
+    },
+    {
+      "id": "n8n",
+      "displayName": "n8n",
+      "owner": "czlonkowski",
+      "repo": "n8n-skills",
+      "branch": "main",
+      "skillsPath": "skills",
+      "pathType": "subdir",
+      "icon": "🔗",
+      "colors": [
+        "#EC4899",
+        "#DB2777"
+      ],
+      "iconUrl": "https://github.com/czlonkowski.png?s=40"
+    }
+  ]
+}

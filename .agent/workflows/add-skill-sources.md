@@ -2,99 +2,117 @@
 description: 如何向技能市场添加新的 GitHub 技能源
 ---
 
-本工作流指导开发者如何向 Antigravity 技能市场添加新的官方或第三方 GitHub 技能源（例如 OpenAI, Google 等）。
+本工作流指导开发者如何向技能市场添加新的官方或第三方 GitHub 技能源。
 
-### 1. 定义技能源类
+> [!TIP]
+> 从 v1.x 版本开始，添加新源**只需编辑配置文件**，无需修改任何代码！
 
-在 [GithubSkillSource.ts](file:///e:/Document/open_skill_Marketplace/src/services/GithubSkillSource.ts) 中创建一个继承自 `BaseSkillSource` 的新类。
+## 添加新技能源
 
-**基础模版：**
+### 1. 编辑配置文件
 
-```typescript
-/**
- * [源名称] 技能源
- */
-export class NewSkillSource extends BaseSkillSource {
-  protected owner = "组织名/用户名";
-  protected repo = "仓库名";
-  protected defaultBranch = "main"; // 或 'master'
+打开 [skill-sources.json](file:///resources/skill-sources.json)，在 `sources` 数组中添加新对象：
 
-  async fetchSkills(): Promise<Skill[]> {
-    // 实现抓取逻辑
-  }
+```json
+{
+  "id": "newsource",
+  "displayName": "New Source",
+  "owner": "github-org-or-user",
+  "repo": "repository-name",
+  "branch": "main",
+  "skillsPath": "skills",
+  "pathType": "subdir",
+  "icon": "N",
+  "colors": ["#FF5733", "#C70039"],
+  "iconUrl": "https://github.com/github-org-or-user.png?s=40"
 }
 ```
 
-### 2. 实现 fetchSkills 逻辑
+### 2. 配置字段说明
 
-根据仓库结构实现目录遍历逻辑：
+| 字段          | 类型                   | 必填 | 说明                               |
+| ------------- | ---------------------- | ---- | ---------------------------------- |
+| `id`          | string                 | ✓    | 源唯一标识，用于内部引用和筛选     |
+| `displayName` | string                 | ✓    | UI 显示名称                        |
+| `owner`       | string                 | ✓    | GitHub 用户名或组织名              |
+| `repo`        | string                 | ✓    | 仓库名                             |
+| `branch`      | string                 | ✓    | 默认分支（如 `main` 或 `master`）  |
+| `skillsPath`  | string \| string[]     | ✓    | 技能目录路径，数组表示多目录       |
+| `pathType`    | `"subdir"` \| `"root"` | ✓    | 目录结构类型                       |
+| `excludeDirs` | string[]               | -    | 需排除的目录（仅 `root` 类型需要） |
+| `icon`        | string                 | ✓    | 技能卡片图标（emoji 或字符）       |
+| `colors`      | [string, string]       | ✓    | 渐变色（起始色，结束色）           |
+| `iconUrl`     | string                 | ✓    | 筛选器头像 URL                     |
 
-- **单目录结构**：参考 `AnthropicSkillSource`。
-- **多目录结构**：参考 `OpenAISkillSource`（通过数组遍历多个路径）。
-- **根目录结构**：参考 `ComposioSkillSource`（技能直接在根目录下）。
+### 3. 目录结构类型
 
-**关键步骤：**
+**`subdir` 类型**（标准子目录结构）：
 
-1. 使用 `this.fetchGithubApi` 获取目录列表。
-2. 对每个子目录调用 `this.fetchSkillMetadata(路径, 目录名)`。
-3. 将结果映射为 `Skill` 对象，确保包含：
-   - `icon`: 该源的特征图标（如 "O" 代表 OpenAI）。
-   - `colors`: 对应的品牌颜色。
-   - `source`: 唯一的源标识符。
-   - `skillPath`: 在仓库中的相对路径。
-   - `branch`: 仓库分支（`this.defaultBranch`）。
-
-### 3. 注册技能源
-
-在 `GithubSkillSource` 类的 `sources` 数组中实例化并添加你的新类：
-
-```typescript
-export class GithubSkillSource {
-  private sources: BaseSkillSource[] = [
-    new AnthropicSkillSource(),
-    new OpenAISkillSource(),
-    new HuggingFaceSkillSource(),
-    new SuperpowersSkillSource(),
-    new ComposioSkillSource(),
-    new NewSkillSource(), // 在此添加
-  ];
-  // ...
-}
+```
+repo/
+├── skills/           ← skillsPath: "skills"
+│   ├── skill-a/
+│   │   └── SKILL.md
+│   └── skill-b/
+│       └── SKILL.md
 ```
 
-### 4. (可选) 添加内置种子数据
+**多目录示例**（如 OpenAI）：
 
-为了保证在 API 受限时仍能看到该源的代表性技能，可以在 `GithubSkillSource` 类的 `seedSkills` 数组中添加该源的技能条目。**注意：种子数据必须包含 `branch` 字段。**
-
-### 5. 在 UI 中注册二级筛选器
-
-打开 [marketplace.html](file:///e:/Document/open_skill_Marketplace/resources/marketplace.html)，在 `sourceFilterContainer` 中添加新源的筛选芯片：
-
-```html
-<div
-  class="sub-filter-chip"
-  data-source="newsource"
-  onclick="setSourceFilter('newsource')"
->
-  <span class="source-icon" style="background: [品牌色];"></span> [源名称]
-</div>
+```json
+"skillsPath": ["skills/.curated", "skills/.experimental", "skills/.system"]
 ```
 
-并在 `createSkillCard` 函数的 `sourceMap` 对象中添加名称映射：
+**`root` 类型**（根目录结构）：
 
-```javascript
-const sourceMap = {
-  // ...
-  newsource: "New Source Display Name",
-};
+```
+repo/
+├── skill-a/          ← skillsPath: ""
+│   └── SKILL.md
+├── skill-b/
+│   └── SKILL.md
+└── .github/          ← excludeDirs: [".github", "template-skill"]
 ```
 
-### 6. 更新 README
+### 4. 验证
 
-在 [README.md](file:///e:/Document/open_skill_Marketplace/README.md) 的「已集成技能源」表格中添加新源的信息。
+```bash
+# 编译验证
+npm run compile
 
-### 7. 验证
+# 启动调试
+F5
 
-1. 运行 `npm run compile` 确保无类型错误。
-2. 启动调试，在"可安装"页面的"来源"筛选器中检查是否出现了新的选项。
-3. 测试安装新源的技能，确认下载正常完成。
+# 检查项：
+# 1. 侧边栏"高赞榜"筛选器中出现新源
+# 2. 点击新源筛选器，技能列表正确过滤
+# 3. 测试安装新源的技能
+```
+
+### 5. 更新 README
+
+在 [README.md](file:///README.md) 的「已集成技能源」表格中添加新源信息。
+
+---
+
+## 常见问题
+
+### Q: 技能源获取失败？
+
+检查：
+
+1. 仓库是否公开
+2. `owner`、`repo`、`branch` 是否正确
+3. `skillsPath` 是否存在
+4. 技能目录中是否有 `SKILL.md` 文件
+
+### Q: 技能不显示名称和描述？
+
+确保 `SKILL.md` 文件包含有效的 YAML 前置数据：
+
+```yaml
+---
+name: "技能名称"
+description: "技能描述"
+---
+```

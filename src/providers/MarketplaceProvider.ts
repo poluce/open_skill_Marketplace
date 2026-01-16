@@ -42,7 +42,7 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
         // 异步加载高赞技能
         this._loadOfficialSkills();
 
-        webviewView.webview.onDidReceiveMessage(data => {
+        webviewView.webview.onDidReceiveMessage(async data => {
             switch (data.command) {
                 case 'install':
                     this._handleInstall(data.skillId, data.skillName);
@@ -68,10 +68,14 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                     this._handleSetLanguage(data.lang);
                     break;
                 case 'setAgentType':
-                    vscode.workspace.getConfiguration('antigravity').update('agentType', data.agentType, vscode.ConfigurationTarget.Global);
+                    await vscode.workspace.getConfiguration('antigravity').update('agentType', data.agentType, vscode.ConfigurationTarget.Global);
+                    this._updateInstalledStatus();
+                    this._refreshView();
                     break;
                 case 'setScope':
-                    vscode.workspace.getConfiguration('antigravity').update('installScope', data.scope, vscode.ConfigurationTarget.Global);
+                    await vscode.workspace.getConfiguration('antigravity').update('installScope', data.scope, vscode.ConfigurationTarget.Global);
+                    this._updateInstalledStatus();
+                    this._refreshView();
                     break;
                 case 'setShowAiCategories':
                     vscode.workspace.getConfiguration('antigravity').update('showAiCategories', data.show, vscode.ConfigurationTarget.Global);
@@ -92,10 +96,7 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
             const isRateLimited = result.isRateLimited;
 
             // 标记已安装状态
-            const installedIds = this._installer.getInstalledSkillIds();
-            for (const skill of officialSkills) {
-                skill.isInstalled = installedIds.includes(String(skill.id));
-            }
+            this._updateInstalledStatus(officialSkills);
 
             // 1. 尝试从本地缓存预填充翻译和分类（实现零等待切换）
             for (const skill of officialSkills) {
@@ -114,6 +115,19 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
         } catch (error) {
             console.error('加载高赞技能失败:', error);
             this._refreshView(true);
+        }
+    }
+
+    /**
+     * 更新技能的已安装状态标记
+     */
+    private _updateInstalledStatus(skills: Skill[] = this._allSkills) {
+        if (skills.length === 0) {
+            return;
+        }
+        const installedIds = this._installer.getInstalledSkillIds();
+        for (const skill of skills) {
+            skill.isInstalled = installedIds.includes(String(skill.id));
         }
     }
 
@@ -284,6 +298,10 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
         const accentColor = config.get<string>('accentColor', '#8A2BE2');
         const glowColor = accentColor.replace('rgb', 'rgba').replace(')', ', 0.3)');
 
+        // 生成外部资源 URI
+        const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'resources', 'marketplace.css'));
+        const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'resources', 'marketplace.js'));
+
         // 读取 HTML 模板文件
         const htmlPath = path.join(this._extensionUri.fsPath, 'resources', 'marketplace.html');
         let html = fs.readFileSync(htmlPath, 'utf8');
@@ -294,9 +312,10 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
         const currentAgentType = config.get<string>('agentType', 'antigravity');
         const currentScope = config.get<string>('installScope', 'global');
 
-        html = html.replace('{{accentColor}}', accentColor);
-        html = html.replace('{{accentGlow}}', glowColor);
+        html = html.replace('{{cssUri}}', cssUri.toString());
+        html = html.replace('{{jsUri}}', jsUri.toString());
         html = html.replace('[/*{{skillsData}}*/]', JSON.stringify(this._allSkills));
+        html = html.replace('[/*{{sourceConfigs}}*/]', JSON.stringify(this._githubSource.getSourceConfigs()));
         html = html.replace('/*{{currentLang}}*/', currentLang);
         html = html.replace('/*{{showAiCategories}}*/', String(showAiCategories));
         html = html.replace('/*{{currentAgentType}}*/', currentAgentType);

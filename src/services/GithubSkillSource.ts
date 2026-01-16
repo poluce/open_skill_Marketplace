@@ -1,4 +1,5 @@
 import * as https from 'https';
+import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -10,28 +11,70 @@ const GITHUB_API_BASE = 'https://api.github.com';
 const RAW_GITHUB_BASE = 'https://raw.githubusercontent.com';
 
 /**
- * 技能源抽象基类
+ * GitHub API 目录内容响应类型
  */
-export abstract class BaseSkillSource {
-    protected abstract owner: string;
-    protected abstract repo: string;
-    protected abstract defaultBranch: string;
+interface GithubContentItem {
+    name: string;
+    path: string;
+    type: 'file' | 'dir';
+}
+
+/**
+ * HTTP 请求头类型
+ */
+type HttpHeaders = Record<string, string>;
+
+/**
+ * 技能源配置接口
+ */
+export interface SkillSourceConfig {
+    id: string;
+    displayName: string;
+    owner: string;
+    repo: string;
+    branch: string;
+    skillsPath: string | string[];
+    pathType: 'subdir' | 'root';
+    excludeDirs?: string[];
+    icon: string;
+    colors: [string, string];
+    iconUrl: string;
+}
+
+/**
+ * 技能源配置文件结构
+ */
+interface SkillSourcesFile {
+    sources: SkillSourceConfig[];
+}
+
+/**
+ * 通用技能源类 - 根据配置动态构建
+ */
+class GenericSkillSource {
+    private config: SkillSourceConfig;
+
+    constructor(config: SkillSourceConfig) {
+        this.config = config;
+    }
 
     /**
-     * 获取统一格式的技能列表
+     * 获取配置
      */
-    abstract fetchSkills(): Promise<Skill[]>;
+    getConfig(): SkillSourceConfig {
+        return this.config;
+    }
 
     /**
      * 发起 GitHub API 请求
      */
-    protected fetchGithubApi(path: string): Promise<string> {
+    private fetchGithubApi(apiPath: string): Promise<string> {
         return new Promise((resolve, reject) => {
-            const url = `${GITHUB_API_BASE}${path}`;
-            const config = vscode.workspace.getConfiguration('antigravity');
-            const token = config.get<string>('githubToken', '');
+            const url = `${GITHUB_API_BASE}${apiPath}`;
+            const vsConfig = vscode.workspace.getConfiguration('antigravity');
+            const token = vsConfig.get<string>('githubToken', '');
 
-            const headers: any = {
+            const headers: HttpHeaders = {
                 'User-Agent': 'VSCode-Antigravity-SkillMarketplace',
                 'Accept': 'application/vnd.github.v3+json'
             };
@@ -40,19 +83,17 @@ export abstract class BaseSkillSource {
                 headers['Authorization'] = `token ${token}`;
             }
 
-            const options = {
-                headers
-            };
+            const options = { headers };
 
-            https.get(url, options, (res: any) => {
+            https.get(url, options, (res: http.IncomingMessage) => {
                 let data = '';
-                res.on('data', (chunk: any) => data += chunk);
+                res.on('data', (chunk: Buffer | string) => data += chunk);
                 res.on('end', () => {
                     if (res.statusCode === 200) {
                         resolve(data);
                     } else {
                         console.error(`GitHub API 请求失败 [${res.statusCode}]: ${url}`);
-                        reject(new Error(`GitHub API 错误: ${res.statusCode} (${path})`));
+                        reject(new Error(`GitHub API 错误: ${res.statusCode} (${apiPath})`));
                     }
                 });
             }).on('error', (err) => {
@@ -65,11 +106,11 @@ export abstract class BaseSkillSource {
     /**
      * 获取 raw 文件内容
      */
-    protected fetchRawContent(url: string): Promise<string> {
+    private fetchRawContent(url: string): Promise<string> {
         return new Promise((resolve, reject) => {
-            https.get(url, (res: any) => {
+            https.get(url, (res: http.IncomingMessage) => {
                 let data = '';
-                res.on('data', (chunk: any) => data += chunk);
+                res.on('data', (chunk: Buffer | string) => data += chunk);
                 res.on('end', () => {
                     if (res.statusCode === 200) {
                         resolve(data);
@@ -84,7 +125,7 @@ export abstract class BaseSkillSource {
     /**
      * 解析 SKILL.md 的 YAML 前置数据
      */
-    protected parseSkillMd(content: string): { name?: string; description?: string; category?: string; license?: string } {
+    private parseSkillMd(content: string): { name?: string; description?: string; category?: string; license?: string } {
         const yamlMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
         if (!yamlMatch) {
             return {};
@@ -112,7 +153,7 @@ export abstract class BaseSkillSource {
     /**
      * 根据描述猜测分类
      */
-    protected internalGuessCategory(skill: ClaudeSkill): string {
+    private guessCategory(skill: ClaudeSkill): string {
         const text = (skill.name + ' ' + skill.description).toLowerCase();
         if (text.match(/code|program|script|debug|git|develop|api|shell|terminal|python|javascript|rust|go|c\+\+|java/)) { return '编程'; }
         if (text.match(/excel|word|document|report|sheet|ppt|office|mail|schedule|meeting|writing/)) { return '办公'; }
@@ -123,11 +164,11 @@ export abstract class BaseSkillSource {
     }
 
     /**
-     * 获取单个技能的元数据
+     * 获取单个技能的元数据（子目录结构）
      */
-    protected async fetchSkillMetadata(subdir: string, skillId: string): Promise<ClaudeSkill | null> {
+    private async fetchSkillMetadata(skillsPath: string, skillId: string): Promise<ClaudeSkill | null> {
         try {
-            const rawUrl = `${RAW_GITHUB_BASE}/${this.owner}/${this.repo}/${this.defaultBranch}/${subdir}/${skillId}/SKILL.md`;
+            const rawUrl = `${RAW_GITHUB_BASE}/${this.config.owner}/${this.config.repo}/${this.config.branch}/${skillsPath}/${skillId}/SKILL.md`;
             const content = await this.fetchRawContent(rawUrl);
             const metadata = this.parseSkillMd(content);
 
@@ -142,285 +183,122 @@ export abstract class BaseSkillSource {
                 category: metadata.category,
                 license: metadata.license,
                 rawUrl,
-                repoLink: `https://github.com/${this.owner}/${this.repo}/tree/${this.defaultBranch}/${subdir}/${skillId}`,
+                repoLink: `https://github.com/${this.config.owner}/${this.config.repo}/tree/${this.config.branch}/${skillsPath}/${skillId}`,
                 isFeatured: true
             };
-        } catch (error) {
+        } catch {
             return null;
         }
     }
-}
 
-/**
- * Anthropic 高赞技能源
- */
-export class AnthropicSkillSource extends BaseSkillSource {
-    protected owner = 'anthropics';
-    protected repo = 'skills';
-    protected defaultBranch = 'main';
-
-    async fetchSkills(): Promise<Skill[]> {
+    /**
+     * 获取单个技能的元数据（根目录结构）
+     */
+    private async fetchSkillMetadataRoot(skillId: string): Promise<ClaudeSkill | null> {
         try {
-            const skillsPath = 'skills';
-            const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents/${skillsPath}`);
-            const dirs = JSON.parse(dirContents).filter((item: any) => item.type === 'dir');
-            console.log(`Anthropic 发现 ${dirs.length} 个潜在技能目录`);
+            const rawUrl = `${RAW_GITHUB_BASE}/${this.config.owner}/${this.config.repo}/${this.config.branch}/${skillId}/SKILL.md`;
+            const content = await this.fetchRawContent(rawUrl);
+            const metadata = this.parseSkillMd(content);
 
-            const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadata(skillsPath, dir.name));
-            const results = await Promise.all(skillPromises);
-
-            const finalSkills = results
-                .filter((s): s is ClaudeSkill => s !== null)
-                .map(s => {
-                    const category = s.category || this.internalGuessCategory(s);
-                    return {
-                        id: `anthropic:${s.id}`,
-                        name: s.name,
-                        desc: s.description,
-                        category: category,
-                        icon: '✓',
-                        colors: ['#6366f1', '#8b5cf6'] as [string, string],
-                        isFeatured: true,
-                        repoLink: s.repoLink,
-                        repoOwner: this.owner,
-                        repoName: this.repo,
-                        skillPath: `skills/${s.id}`,
-                        source: 'anthropic',
-                        branch: this.defaultBranch
-                    };
-                });
-            console.log(`Anthropic 成功解析 ${finalSkills.length} 个技能`);
-            return finalSkills;
-        } catch (e) {
-            console.error('Anthropic 技能抓取失败:', e);
-            return [];
-        }
-    }
-}
-
-/**
- * OpenAI 高赞技能源
- */
-export class OpenAISkillSource extends BaseSkillSource {
-    protected owner = 'openai';
-    protected repo = 'skills';
-    protected defaultBranch = 'main';
-    private categories = ['skills/.curated', 'skills/.experimental', 'skills/.system'];
-
-    async fetchSkills(): Promise<Skill[]> {
-        const allSkills: Skill[] = [];
-
-        const fetchResults = await Promise.all(this.categories.map(async (path) => {
-            try {
-                const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents/${path}`);
-                const dirs = JSON.parse(dirContents).filter((item: any) => item.type === 'dir');
-                console.log(`OpenAI [${path}] 发现 ${dirs.length} 个潜在技能目录`);
-
-                const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadata(path, dir.name));
-                const results = await Promise.all(skillPromises);
-
-                return results
-                    .filter((s): s is ClaudeSkill => s !== null)
-                    .map(s => {
-                        const category = s.category || this.internalGuessCategory(s);
-                        return {
-                            id: `openai:${s.id}`,
-                            name: s.name,
-                            desc: s.description,
-                            category: category,
-                            icon: 'O',
-                            colors: ['#10a37f', '#108060'] as [string, string],
-                            isFeatured: true,
-                            repoLink: s.repoLink,
-                            repoOwner: this.owner,
-                            repoName: this.repo,
-                            skillPath: `${path}/${s.id}`,
-                            source: 'openai',
-                            branch: this.defaultBranch
-                        };
-                    });
-            } catch (err) {
-                console.warn(`跳过 OpenAI 路径 ${path}:`, err);
-                return [];
+            if (!metadata.name || !metadata.description) {
+                return null;
             }
-        }));
 
-        fetchResults.forEach(batch => allSkills.push(...batch));
-        return allSkills;
-    }
-}
-
-/**
- * HuggingFace 高赞技能源
- */
-export class HuggingFaceSkillSource extends BaseSkillSource {
-    protected owner = 'huggingface';
-    protected repo = 'skills';
-    protected defaultBranch = 'main';
-
-    async fetchSkills(): Promise<Skill[]> {
-        try {
-            const skillsPath = 'skills';
-            const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents/${skillsPath}`);
-            const dirs = JSON.parse(dirContents).filter((item: any) => item.type === 'dir');
-            console.log(`HuggingFace 发现 ${dirs.length} 个潜在技能目录`);
-
-            const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadata(skillsPath, dir.name));
-            const results = await Promise.all(skillPromises);
-
-            const finalSkills = results
-                .filter((s): s is ClaudeSkill => s !== null)
-                .map(s => {
-                    const category = s.category || this.internalGuessCategory(s);
-                    return {
-                        id: `huggingface:${s.id}`,
-                        name: s.name,
-                        desc: s.description,
-                        category: category,
-                        icon: 'H',
-                        colors: ['#FFD21E', '#FF9D00'] as [string, string],
-                        isFeatured: true,
-                        repoLink: s.repoLink,
-                        repoOwner: this.owner,
-                        repoName: this.repo,
-                        skillPath: `skills/${s.id}`,
-                        source: 'huggingface',
-                        branch: this.defaultBranch
-                    };
-                });
-            console.log(`HuggingFace 成功解析 ${finalSkills.length} 个技能`);
-            return finalSkills;
-        } catch (e) {
-            console.error('HuggingFace 技能抓取失败:', e);
-            return [];
+            return {
+                id: skillId,
+                name: metadata.name,
+                description: metadata.description,
+                category: metadata.category,
+                license: metadata.license,
+                rawUrl,
+                repoLink: `https://github.com/${this.config.owner}/${this.config.repo}/tree/${this.config.branch}/${skillId}`,
+                isFeatured: true
+            };
+        } catch {
+            return null;
         }
     }
-}
 
-/**
- * Superpowers 技能源 (obra/superpowers)
- */
-export class SuperpowersSkillSource extends BaseSkillSource {
-    protected owner = 'obra';
-    protected repo = 'superpowers';
-    protected defaultBranch = 'main';
-
-    async fetchSkills(): Promise<Skill[]> {
-        try {
-            const skillsPath = 'skills';
-            const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents/${skillsPath}`);
-            const dirs = JSON.parse(dirContents).filter((item: any) => item.type === 'dir');
-            console.log(`Superpowers 发现 ${dirs.length} 个潜在技能目录`);
-
-            const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadata(skillsPath, dir.name));
-            const results = await Promise.all(skillPromises);
-
-            const finalSkills = results
-                .filter((s): s is ClaudeSkill => s !== null)
-                .map(s => {
-                    const category = s.category || this.internalGuessCategory(s);
-                    return {
-                        id: `superpowers:${s.id}`,
-                        name: s.name,
-                        desc: s.description,
-                        category: category,
-                        icon: 'S',
-                        colors: ['#FF6B35', '#F7931E'] as [string, string],
-                        isFeatured: true,
-                        repoLink: s.repoLink,
-                        repoOwner: this.owner,
-                        repoName: this.repo,
-                        skillPath: `skills/${s.id}`,
-                        source: 'superpowers',
-                        branch: this.defaultBranch
-                    };
-                });
-            console.log(`Superpowers 成功解析 ${finalSkills.length} 个技能`);
-            return finalSkills;
-        } catch (e) {
-            console.error('Superpowers 技能抓取失败:', e);
-            return [];
-        }
+    /**
+     * 将 ClaudeSkill 转换为统一的 Skill 格式
+     */
+    private toSkill(claudeSkill: ClaudeSkill, skillPath: string): Skill {
+        const category = claudeSkill.category || this.guessCategory(claudeSkill);
+        return {
+            id: `${this.config.id}:${claudeSkill.id}`,
+            name: claudeSkill.name,
+            desc: claudeSkill.description,
+            category: category,
+            icon: this.config.icon,
+            colors: this.config.colors,
+            isFeatured: true,
+            repoLink: claudeSkill.repoLink,
+            repoOwner: this.config.owner,
+            repoName: this.config.repo,
+            skillPath: skillPath,
+            source: this.config.id,
+            branch: this.config.branch
+        };
     }
-}
 
-/**
- * Composio 技能源 (ComposioHQ/awesome-claude-skills)
- * 特殊结构：技能目录直接在根目录下，非 skills 子目录
- */
-export class ComposioSkillSource extends BaseSkillSource {
-    protected owner = 'ComposioHQ';
-    protected repo = 'awesome-claude-skills';
-    protected defaultBranch = 'master';
-
-    // 需要排除的非技能目录
-    private excludeDirs = ['.claude-plugin', '.github', 'template-skill'];
-
-    async fetchSkills(): Promise<Skill[]> {
+    /**
+     * 从单个目录路径获取技能列表
+     */
+    private async fetchSkillsFromPath(skillsPath: string): Promise<Skill[]> {
         try {
-            // 直接获取根目录
-            const dirContents = await this.fetchGithubApi(`/repos/${this.owner}/${this.repo}/contents`);
-            const dirs = JSON.parse(dirContents)
-                .filter((item: any) => item.type === 'dir' && !this.excludeDirs.includes(item.name));
-            console.log(`Composio 发现 ${dirs.length} 个潜在技能目录`);
+            const apiPath = skillsPath
+                ? `/repos/${this.config.owner}/${this.config.repo}/contents/${skillsPath}`
+                : `/repos/${this.config.owner}/${this.config.repo}/contents`;
 
-            const skillPromises = dirs.map((dir: any) => this.fetchSkillMetadataRoot(dir.name));
+            const dirContents = await this.fetchGithubApi(apiPath);
+            let dirs = JSON.parse(dirContents).filter((item: GithubContentItem) => item.type === 'dir');
+
+            // 排除指定目录
+            if (this.config.excludeDirs && this.config.excludeDirs.length > 0) {
+                dirs = dirs.filter((item: GithubContentItem) => !this.config.excludeDirs!.includes(item.name));
+            }
+
+            console.log(`[${this.config.displayName}] 在 ${skillsPath || '根目录'} 发现 ${dirs.length} 个潜在技能目录`);
+
+            // 根据 pathType 选择元数据获取方式
+            const skillPromises = dirs.map((dir: GithubContentItem) => {
+                if (this.config.pathType === 'root') {
+                    return this.fetchSkillMetadataRoot(dir.name);
+                } else {
+                    return this.fetchSkillMetadata(skillsPath, dir.name);
+                }
+            });
+
             const results = await Promise.all(skillPromises);
 
-            const finalSkills = results
+            return results
                 .filter((s): s is ClaudeSkill => s !== null)
                 .map(s => {
-                    const category = s.category || this.internalGuessCategory(s);
-                    return {
-                        id: `composio:${s.id}`,
-                        name: s.name,
-                        desc: s.description,
-                        category: category,
-                        icon: 'C',
-                        colors: ['#7C3AED', '#A855F7'] as [string, string],
-                        isFeatured: true,
-                        repoLink: s.repoLink,
-                        repoOwner: this.owner,
-                        repoName: this.repo,
-                        skillPath: s.id,
-                        source: 'composio',
-                        branch: this.defaultBranch
-                    };
+                    const finalPath = this.config.pathType === 'root' ? s.id : `${skillsPath}/${s.id}`;
+                    return this.toSkill(s, finalPath);
                 });
-            console.log(`Composio 成功解析 ${finalSkills.length} 个技能`);
-            return finalSkills;
-        } catch (e) {
-            console.error('Composio 技能抓取失败:', e);
+        } catch (err) {
+            console.warn(`[${this.config.displayName}] 跳过路径 ${skillsPath}:`, err);
             return [];
         }
     }
 
     /**
-     * 从根目录获取技能元数据 (技能目录直接在根目录)
+     * 获取统一格式的技能列表
      */
-    private async fetchSkillMetadataRoot(skillId: string): Promise<ClaudeSkill | null> {
-        try {
-            const rawUrl = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${this.defaultBranch}/${skillId}/SKILL.md`;
-            const content = await this.fetchRawContent(rawUrl);
-            const metadata = this.parseSkillMd(content);
+    async fetchSkills(): Promise<Skill[]> {
+        const allSkills: Skill[] = [];
 
-            if (!metadata.name || !metadata.description) {
-                return null;
-            }
+        // 处理单路径或多路径
+        const paths = Array.isArray(this.config.skillsPath)
+            ? this.config.skillsPath
+            : [this.config.skillsPath];
 
-            return {
-                id: skillId,
-                name: metadata.name,
-                description: metadata.description,
-                category: metadata.category,
-                license: metadata.license,
-                rawUrl,
-                repoLink: `https://github.com/${this.owner}/${this.repo}/tree/${this.defaultBranch}/${skillId}`,
-                isFeatured: true
-            };
-        } catch (error) {
-            return null;
-        }
+        const results = await Promise.all(paths.map(p => this.fetchSkillsFromPath(p)));
+        results.forEach(batch => allSkills.push(...batch));
+
+        console.log(`[${this.config.displayName}] 成功解析 ${allSkills.length} 个技能`);
+        return allSkills;
     }
 }
 
@@ -428,91 +306,45 @@ export class ComposioSkillSource extends BaseSkillSource {
  * 统一聚合入口类
  */
 export class GithubSkillSource {
-    private sources: BaseSkillSource[] = [
-        new AnthropicSkillSource(),
-        new OpenAISkillSource(),
-        new HuggingFaceSkillSource(),
-        new SuperpowersSkillSource(),
-        new ComposioSkillSource()
-    ];
+    private sources: GenericSkillSource[] = [];
+    private sourceConfigs: SkillSourceConfig[] = [];
 
-    private seedSkills: Skill[] = [
-        {
-            id: 'anthropic:algorithmic-art',
-            name: 'Algorithmic Art',
-            desc: '使用代码生成精美的算法艺术图。',
-            category: '创意',
-            icon: '✓',
-            colors: ['#6366f1', '#8b5cf6'],
-            isFeatured: true,
-            repoLink: 'https://github.com/anthropics/skills/tree/main/skills/algorithmic-art',
-            repoOwner: 'anthropics',
-            repoName: 'skills',
-            skillPath: 'skills/algorithmic-art',
-            source: 'anthropic',
-            branch: 'main'
-        },
-        {
-            id: 'openai:gh-address-comments',
-            name: 'Address Comments',
-            desc: '自动分析并回复 GitHub PR 中的评审意见。',
-            category: '编程',
-            icon: 'O',
-            colors: ['#10a37f', '#108060'],
-            isFeatured: true,
-            repoLink: 'https://github.com/openai/skills/tree/main/skills/.curated/gh-address-comments',
-            repoOwner: 'openai',
-            repoName: 'skills',
-            skillPath: 'skills/.curated/gh-address-comments',
-            source: 'openai',
-            branch: 'main'
-        },
-        {
-            id: 'huggingface:hugging-face-datasets',
-            name: 'Hugging Face Datasets',
-            desc: '在 Hugging Face Hub 上创建和管理数据集。支持 SQL 查询和转换。',
-            category: '分析',
-            icon: 'H',
-            colors: ['#FFD21E', '#FF9D00'],
-            isFeatured: true,
-            repoLink: 'https://github.com/huggingface/skills/tree/main/skills/hugging-face-datasets',
-            repoOwner: 'huggingface',
-            repoName: 'skills',
-            skillPath: 'skills/hugging-face-datasets',
-            source: 'huggingface',
-            branch: 'main'
-        },
-        {
-            id: 'superpowers:brainstorming',
-            name: 'Brainstorming',
-            desc: '将创意想法转化为完整的设计规格，通过协作式对话探索需求和方案。',
-            category: '编程',
-            icon: 'S',
-            colors: ['#FF6B35', '#F7931E'],
-            isFeatured: true,
-            repoLink: 'https://github.com/obra/superpowers/tree/main/skills/brainstorming',
-            repoOwner: 'obra',
-            repoName: 'superpowers',
-            skillPath: 'skills/brainstorming',
-            source: 'superpowers',
-            branch: 'main'
-        },
-        {
-            id: 'composio:mcp-builder',
-            name: 'MCP Builder',
-            desc: '创建高质量的 MCP 服务器，使 LLM 能够通过精心设计的工具与外部服务交互。',
-            category: '编程',
-            icon: 'C',
-            colors: ['#7C3AED', '#A855F7'],
-            isFeatured: true,
-            repoLink: 'https://github.com/ComposioHQ/awesome-claude-skills/tree/master/mcp-builder',
-            repoOwner: 'ComposioHQ',
-            repoName: 'awesome-claude-skills',
-            skillPath: 'mcp-builder',
-            source: 'composio',
-            branch: 'master'
+    constructor() {
+        this.loadSourceConfigs();
+    }
+
+    /**
+     * 从配置文件加载技能源
+     */
+    private loadSourceConfigs() {
+        try {
+            // 获取扩展根目录
+            // 打包后 __dirname = .../dist/，往上一级是扩展根目录
+            const extensionRoot = path.resolve(__dirname, '..');
+            const configPath = path.join(extensionRoot, 'resources', 'skill-sources.json');
+
+            if (fs.existsSync(configPath)) {
+                const configContent = fs.readFileSync(configPath, 'utf8');
+                const config: SkillSourcesFile = JSON.parse(configContent);
+                this.sourceConfigs = config.sources;
+
+                // 为每个配置创建 GenericSkillSource 实例
+                this.sources = this.sourceConfigs.map(cfg => new GenericSkillSource(cfg));
+                console.log(`成功加载 ${this.sources.length} 个技能源配置`);
+            } else {
+                console.error('技能源配置文件不存在:', configPath);
+            }
+        } catch (error) {
+            console.error('加载技能源配置失败:', error);
         }
-    ];
+    }
+
+    /**
+     * 获取源配置列表（供 UI 使用）
+     */
+    getSourceConfigs(): SkillSourceConfig[] {
+        return this.sourceConfigs;
+    }
 
     /**
      * 获取合并后的高赞技能列表
@@ -520,7 +352,7 @@ export class GithubSkillSource {
      */
     async fetchSkillList(): Promise<{ skills: Skill[], isRateLimited: boolean }> {
         let isRateLimited = false;
-        
+
         try {
             console.log('正在从 GitHub 实时获取技能列表...');
             const results = await Promise.all(this.sources.map(async (source) => {
@@ -549,8 +381,8 @@ export class GithubSkillSource {
             return { skills: cached, isRateLimited: true }; // 使用缓存也标记为受限
         }
 
-        console.warn('所有请求和缓存均失效，加载内置种子数据');
-        return { skills: this.seedSkills, isRateLimited: true };
+        console.warn('所有请求和缓存均失效');
+        return { skills: [], isRateLimited: true };
     }
 
     private getCachePath(): string {
@@ -588,12 +420,5 @@ export class GithubSkillSource {
             console.error('加载缓存失败:', e);
         }
         return [];
-    }
-
-    /**
-     * 兼容性转换逻辑
-     */
-    toUnifiedSkill(skill: Skill): Skill {
-        return skill;
     }
 }
