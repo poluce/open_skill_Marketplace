@@ -243,14 +243,13 @@ body {
 
 .btn-group {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 4px;
-  margin-top: 4px;
-  justify-content: flex-end;
+  justify-content: center;
   margin-left: auto;
   flex-shrink: 0;
-  width: fit-content;
-  max-width: 150px;
+  width: 54px;
+  margin-top: 2px;
 }
 
 .skill-info {
@@ -290,7 +289,7 @@ body {
   background-color: var(--accent-color, #8a2be2);
   color: white;
   border: none;
-  padding: 3px 12px;
+  padding: 3px 0;
   border-radius: 4px;
   font-size: 11px;
   font-weight: 500;
@@ -298,7 +297,8 @@ body {
   transition: opacity 0.2s;
   flex-shrink: 0;
   white-space: nowrap;
-  height: 24px;
+  height: 20px;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -333,13 +333,14 @@ body {
   background: transparent;
   border: 1px solid var(--accent-color);
   color: var(--accent-color);
-  padding: 3px 12px;
+  padding: 3px 0;
   border-radius: 4px;
   font-size: 11px;
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
-  height: 24px;
+  height: 20px;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -358,9 +359,11 @@ body {
   0% {
     opacity: 0.6;
   }
+
   50% {
     opacity: 1;
   }
+
   100% {
     opacity: 0.6;
   }
@@ -424,13 +427,14 @@ body {
   background: transparent;
   border: 1px solid #ef4444;
   color: #ef4444;
-  padding: 3px 12px;
+  padding: 3px 0;
   border-radius: 4px;
   font-size: 11px;
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
-  height: 24px;
+  height: 20px;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -465,6 +469,7 @@ body {
   0% {
     transform: rotate(0deg);
   }
+
   100% {
     transform: rotate(360deg);
   }

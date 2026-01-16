@@ -18,6 +18,15 @@
 - **同名冲突解决**：采用 `source:id` 模式确保不同来源的同名技能互不干扰，物理路径自动映射为 `source--id`。
 - **智能环境校验**：安装前自动检查 Agent 工具是否已安装，并验证工作区状态。
 - **多语言驱动**：支持通过 DeepSeek 自动将技能描述翻译为中文，并自动识别 AI 分类。
+- **直观界面布局**：采用纵向按钮设计（查看/安装），优化了在高分屏下的预览体验。
+
+## 界面预览
+
+![发现技能 - 列表展示](https://raw.githubusercontent.com/poluce/open_skill_Marketplace/dev/resources/Snipaste_2026-01-16_13-31-58.png)
+*发现技能：支持多源筛选与 AI 智能分类，纵向按钮布局提升操作效率。*
+
+![已安装 - 管理界面](https://raw.githubusercontent.com/poluce/open_skill_Marketplace/dev/resources/Snipaste_2026-01-16_13-31-25.png)
+*已安装：清晰展示已集成到不同 Agent 的技能，支持一键删除。*
 
 ## 已集成技能源
 
