@@ -6,7 +6,7 @@ export class AntigravityAgent implements IAgent {
     name = 'Antigravity (Gemini)';
 
     getGlobalPath(home: string): string {
-        return path.join(home, '.gemini', 'antigravity', 'skills');
+        return path.join(home, '.gemini', 'antigravity', 'global_skills');
     }
 
     getProjectPath(root: string): string {

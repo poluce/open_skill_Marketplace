@@ -152,7 +152,7 @@ export class SkillInstaller {
         const config = vscode.workspace.getConfiguration('antigravity');
         const scope = config.get<string>('installScope', 'global');
         if (scope === 'project' && !vscode.workspace.workspaceFolders?.[0]) {
-            vscode.window.showWarningMessage('当前未打开 VS Code 工作区，技能将安装到全局目录（~/.gemini/skills/）');
+            vscode.window.showWarningMessage('当前未打开 VS Code 工作区，技能将安装到全局目录（~/.gemini/antigravity/global_skills/）');
         }
 
         // 验证必要的仓库信息
