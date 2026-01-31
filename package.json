@@ -49,17 +49,19 @@
           "type": "string",
           "enum": [
             "antigravity",
+            "gemini",
             "claude",
             "codex",
             "opencode"
           ],
           "enumDescriptions": [
             "Antigravity (Gemini)",
+            "Gemini CLI",
             "Claude Code CLI",
             "Codex CLI",
             "Open Code"
           ],
-          "default": "antigravity",
+          "default": "gemini",
           "description": "目标 Agent 类型"
         },
         "antigravity.installScope": {

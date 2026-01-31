@@ -5,6 +5,7 @@ import * as https from 'https';
 import * as http from 'http';
 import * as os from 'os';
 import { Skill } from '../models/Skill';
+import { SkillMetadata } from '../models/SkillMetadata';
 
 const RAW_GITHUB_BASE = 'https://raw.githubusercontent.com';
 const GITHUB_API_BASE = 'https://api.github.com';
@@ -19,15 +20,19 @@ export class SkillInstaller {
 
     /**
      * 获取安装目标路径，并执行环境校验
+     * @param throwOnMissing 如果为 false，在环境不存在时返回空字符串而不抛出错误
      */
-    getInstallPath(): string {
+    getInstallPath(throwOnMissing: boolean = true): string {
         const config = vscode.workspace.getConfiguration('antigravity');
         const agentId = config.get<string>('agentType', 'antigravity');
         const scope = config.get<string>('installScope', 'global');
 
         const agent = AgentManager.getInstance().getAgent(agentId);
         if (!agent) {
-            throw new Error(`未知的 Agent 类型: ${agentId}`);
+            if (throwOnMissing) {
+                throw new Error(`未知的 Agent 类型: ${agentId}`);
+            }
+            return '';
         }
 
         // 优先锁定基准目录
@@ -35,7 +40,10 @@ export class SkillInstaller {
         if (scope === 'project') {
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
             if (!workspaceFolder) {
-                throw new Error('请先打开一个 VS Code 项目或工作区以进行项目级安装。');
+                if (throwOnMissing) {
+                    throw new Error('请先打开一个 VS Code 项目或工作区以进行项目级安装。');
+                }
+                return '';
             }
             basePath = workspaceFolder.uri.fsPath;
         } else {
@@ -47,12 +55,39 @@ export class SkillInstaller {
             ? agent.getProjectPath(basePath)
             : agent.getGlobalPath(basePath);
 
-        // 全局校验：如果目录不存在，提示用户安装 Agent
-        if (scope === 'global' && !fs.existsSync(finalPath)) {
-            // 注意：对于 Open Code 这种深层路径，可能需要检查其父目录
-            const checkPath = agentId === 'opencode' ? path.dirname(finalPath) : finalPath;
-            if (!fs.existsSync(checkPath)) {
-                throw new Error(`未检测到 ${agent.name} 的环境，请先安装该 Agent 工具。`);
+        // 全局校验：检查 Agent 根目录是否存在
+        if (scope === 'global') {
+            // 定义每个 Agent 的根目录（用于检测 Agent 是否已安装）
+            const agentRootDirs: Record<string, string> = {
+                'antigravity': path.join(basePath, '.gemini'),
+                'gemini': path.join(basePath, '.gemini'),
+                'claude': path.join(basePath, '.claude'),
+                'codex': path.join(basePath, '.codex'),
+                'opencode': path.join(basePath, '.config', 'opencode')
+            };
+
+            const agentRootDir = agentRootDirs[agentId];
+
+            // 检查 Agent 根目录是否存在
+            if (agentRootDir && !fs.existsSync(agentRootDir)) {
+                if (throwOnMissing) {
+                    throw new Error(`未检测到 ${agent.name} 的环境，请先安装该 Agent 工具。`);
+                }
+                return '';
+            }
+
+            // 如果 Agent 根目录存在，但技能目录不存在，自动创建技能目录
+            if (!fs.existsSync(finalPath)) {
+                try {
+                    fs.mkdirSync(finalPath, { recursive: true });
+                    console.log(`已自动创建技能目录: ${finalPath}`);
+                } catch (error) {
+                    console.warn(`创建技能目录失败: ${error}`);
+                    if (throwOnMissing) {
+                        throw new Error(`无法创建技能目录: ${finalPath}`);
+                    }
+                    return '';
+                }
             }
         }
 
@@ -90,9 +125,9 @@ export class SkillInstaller {
      */
     getInstalledSkillIds(): string[] {
         try {
-            const installPath = this.getInstallPath();
+            const installPath = this.getInstallPath(false); // 不抛出错误
 
-            if (!fs.existsSync(installPath)) {
+            if (!installPath || !fs.existsSync(installPath)) {
                 return [];
             }
 
@@ -144,8 +179,9 @@ export class SkillInstaller {
     /**
      * 安装技能
      * @param skill 完整的 Skill 对象，包含仓库信息
+     * @param onProgress 可选的进度回调函数
      */
-    async installSkill(skill: Skill): Promise<boolean> {
+    async installSkill(skill: Skill, onProgress?: (current: number, total: number) => void): Promise<boolean> {
         const skillId = String(skill.id);
         const targetDir = path.join(this.getInstallPath(), this.getSafeDirName(skillId));
 
@@ -166,8 +202,7 @@ export class SkillInstaller {
             const files = await this.fetchSkillFiles(skill);
 
             if (files.length === 0) {
-                vscode.window.showErrorMessage(`技能 "${skill.name}" 没有找到可安装的文件`);
-                return false;
+                throw new Error('没有找到可安装的文件');
             }
 
             // 2. 创建目标目录
@@ -175,18 +210,37 @@ export class SkillInstaller {
                 fs.mkdirSync(targetDir, { recursive: true });
             }
 
-            // 3. 下载所有文件
-            const downloadPromises = files.map(file =>
-                this.downloadFile(skill, file.path, path.join(targetDir, file.name))
-            );
+            // 3. 下载所有文件（串行下载以便追踪进度）
+            let completed = 0;
+            const total = files.length;
 
-            await Promise.all(downloadPromises);
+            for (const file of files) {
+                await this.downloadFile(skill, file.path, path.join(targetDir, file.name));
+                completed++;
+                if (onProgress) {
+                    onProgress(completed, total);
+                }
+            }
+
+            // 4. 保存元数据
+            this.saveMetadata(skill, targetDir);
 
             vscode.window.showInformationMessage(`技能 "${skill.name}" 已安装到 ${targetDir}`);
             return true;
 
         } catch (error) {
             const errMsg = error instanceof Error ? error.message : String(error);
+
+            // 错误恢复：删除半成品目录
+            if (fs.existsSync(targetDir)) {
+                try {
+                    fs.rmSync(targetDir, { recursive: true, force: true });
+                    console.log(`已清理失败的安装目录: ${targetDir}`);
+                } catch (cleanupError) {
+                    console.error('清理失败目录时出错:', cleanupError);
+                }
+            }
+
             vscode.window.showErrorMessage(`安装失败: ${errMsg}`);
             return false;
         }
@@ -275,6 +329,128 @@ export class SkillInstaller {
             return path.join(os.homedir(), inputPath.slice(1));
         }
         return inputPath;
+    }
+
+    /**
+     * 保存技能安装元数据
+     */
+    private saveMetadata(skill: Skill, targetDir: string): void {
+        const metadata: SkillMetadata = {
+            skillId: String(skill.id),
+            installedVersion: skill.commitSha || 'unknown',
+            installedAt: Date.now(),
+            source: skill.source || '',
+            repoOwner: skill.repoOwner || '',
+            repoName: skill.repoName || '',
+            skillPath: skill.skillPath || '',
+            branch: skill.branch || 'main'
+        };
+
+        const metadataPath = path.join(targetDir, '.metadata.json');
+        fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
+    }
+
+    /**
+     * 读取技能元数据
+     */
+    private readMetadata(skillDir: string): SkillMetadata | null {
+        try {
+            const metadataPath = path.join(skillDir, '.metadata.json');
+            if (fs.existsSync(metadataPath)) {
+                return JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+            }
+        } catch (error) {
+            console.warn('读取元数据失败:', error);
+        }
+        return null;
+    }
+
+    /**
+     * 为旧技能生成元数据（向后兼容）
+     */
+    private generateLegacyMetadata(skillId: string, skillDir: string): void {
+        const metadata: SkillMetadata = {
+            skillId: skillId,
+            installedVersion: 'legacy',
+            installedAt: Date.now(),
+            source: skillId.split(':')[0] || 'unknown',
+            repoOwner: '',
+            repoName: '',
+            skillPath: '',
+            branch: 'main'
+        };
+
+        const metadataPath = path.join(skillDir, '.metadata.json');
+        fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
+    }
+
+    /**
+     * 检测已安装技能的更新状态
+     */
+    async checkUpdates(
+        allSkills: Skill[]
+    ): Promise<Map<string, { hasUpdate: boolean; installedVersion: string; latestVersion: string }>> {
+        const updateMap = new Map();
+        const installPath = this.getInstallPath(false); // 不抛出错误
+
+        if (!installPath || !fs.existsSync(installPath)) {
+            return updateMap;
+        }
+
+        const entries = fs.readdirSync(installPath, { withFileTypes: true });
+
+        for (const entry of entries) {
+            if (!entry.isDirectory()) {continue;}
+
+            const skillDir = path.join(installPath, entry.name);
+            let metadata = this.readMetadata(skillDir);
+
+            // 向后兼容：如果没有元数据，生成一个
+            if (!metadata) {
+                const skillId = this.getSkillIdFromDirName(entry.name);
+                this.generateLegacyMetadata(skillId, skillDir);
+                metadata = this.readMetadata(skillDir);
+            }
+
+            if (!metadata) {continue;}
+
+            // 从 allSkills 中找到对应的技能（包含最新 commitSha）
+            const latestSkill = allSkills.find(s => String(s.id) === metadata!.skillId);
+
+            if (latestSkill && latestSkill.commitSha) {
+                const hasUpdate = metadata.installedVersion !== latestSkill.commitSha
+                               && metadata.installedVersion !== 'legacy';
+                updateMap.set(metadata.skillId, {
+                    hasUpdate,
+                    installedVersion: metadata.installedVersion,
+                    latestVersion: latestSkill.commitSha
+                });
+            }
+        }
+
+        return updateMap;
+    }
+
+    /**
+     * 更新技能（先删除后重新安装）
+     */
+    async updateSkill(skill: Skill, onProgress?: (current: number, total: number) => void): Promise<boolean> {
+        const skillId = String(skill.id);
+        const skillDir = path.join(this.getInstallPath(), this.getSafeDirName(skillId));
+
+        // 删除旧版本
+        if (fs.existsSync(skillDir)) {
+            fs.rmSync(skillDir, { recursive: true, force: true });
+        }
+
+        // 重新安装
+        const success = await this.installSkill(skill, onProgress);
+
+        if (success) {
+            vscode.window.showInformationMessage(`技能 "${skill.name}" 已更新到最新版本`);
+        }
+
+        return success;
     }
 }
 

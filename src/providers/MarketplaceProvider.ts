@@ -50,13 +50,19 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                 case 'uninstall':
                     this._handleUninstall(data.skillId, data.skillName);
                     break;
+                case 'update':
+                    this._handleUpdate(data.skillId, data.skillName);
+                    break;
+                case 'showDetail':
+                    this._showSkillDetail(data.skillId);
+                    break;
                 case 'openRepo':
                     if (data.url) {
                         vscode.env.openExternal(vscode.Uri.parse(data.url));
                     }
                     break;
                 case 'search':
-                    console.log(`搜索技能: ${data.query}`);
+                    // 搜索由前端 updateUI() 实时处理，后端无需响应
                     break;
                 case 'ready':
                     this._refreshView();
@@ -97,6 +103,16 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
 
             // 标记已安装状态
             this._updateInstalledStatus(officialSkills);
+
+            // 检测更新
+            const updateMap = await this._installer.checkUpdates(officialSkills);
+            for (const skill of officialSkills) {
+                const updateInfo = updateMap.get(String(skill.id));
+                if (updateInfo) {
+                    skill.hasUpdate = updateInfo.hasUpdate;
+                    skill.installedVersion = updateInfo.installedVersion;
+                }
+            }
 
             // 1. 尝试从本地缓存预填充翻译和分类（实现零等待切换）
             for (const skill of officialSkills) {
@@ -199,14 +215,31 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
             return;
         }
 
-        // 执行安装（传递完整的 Skill 对象）
-        const success = await this._installer.installSkill(skill);
+        // 使用 VS Code Progress API 显示进度
+        await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: `正在安装 "${skillName}"`,
+                cancellable: false
+            },
+            async (progress) => {
+                const success = await this._installer.installSkill(skill, (current, total) => {
+                    const percentage = Math.round((current / total) * 100);
+                    progress.report({
+                        increment: 100 / total,
+                        message: `${current}/${total} 文件 (${percentage}%)`
+                    });
+                });
 
-        if (success) {
-            // 更新已安装状态并刷新视图
-            skill.isInstalled = true;
-            this._refreshView();
-        }
+                if (success) {
+                    // 更新已安装状态并刷新视图
+                    skill.isInstalled = true;
+                    this._refreshView();
+                }
+
+                return success;
+            }
+        );
     }
 
     /**
@@ -226,6 +259,144 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
             skill.isInstalled = false;
             this._refreshView();
         }
+    }
+
+    /**
+     * 处理更新请求
+     */
+    private async _handleUpdate(skillId: string | number, skillName: string) {
+        const skill = this._allSkills.find(s => String(s.id) === String(skillId));
+
+        if (!skill) {
+            vscode.window.showErrorMessage(`未找到技能: ${skillName}`);
+            return;
+        }
+
+        // 使用 VS Code Progress API 显示进度
+        await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: `正在更新 "${skillName}"`,
+                cancellable: false
+            },
+            async (progress) => {
+                const success = await this._installer.updateSkill(skill, (current, total) => {
+                    const percentage = Math.round((current / total) * 100);
+                    progress.report({
+                        increment: 100 / total,
+                        message: `${current}/${total} 文件 (${percentage}%)`
+                    });
+                });
+
+                if (success) {
+                    skill.hasUpdate = false;
+                    skill.installedVersion = skill.commitSha;
+                    this._refreshView();
+                }
+
+                return success;
+            }
+        );
+    }
+
+    /**
+     * 显示技能详情页
+     */
+    private async _showSkillDetail(skillId: string | number) {
+        const skill = this._allSkills.find(s => String(s.id) === String(skillId));
+
+        if (!skill) {
+            vscode.window.showErrorMessage('未找到技能详情');
+            return;
+        }
+
+        // 创建 WebView Panel
+        const panel = vscode.window.createWebviewPanel(
+            'skillDetail',
+            skill.name,
+            vscode.ViewColumn.One,
+            { enableScripts: true }
+        );
+
+        // 获取 README 内容
+        const readmeContent = await this._fetchSkillReadme(skill);
+
+        panel.webview.html = this._getDetailHtml(skill, readmeContent);
+    }
+
+    /**
+     * 获取技能的 README 内容
+     */
+    private async _fetchSkillReadme(skill: Skill): Promise<string> {
+        return new Promise((resolve) => {
+            const https = require('https');
+            const branch = skill.branch || 'main';
+            const url = `https://raw.githubusercontent.com/${skill.repoOwner}/${skill.repoName}/${branch}/${skill.skillPath}/SKILL.md`;
+
+            https.get(url, (res: any) => {
+                let data = '';
+                res.on('data', (chunk: any) => data += chunk);
+                res.on('end', () => {
+                    if (res.statusCode === 200) {
+                        resolve(data);
+                    } else {
+                        resolve('# 无法加载技能详情\n\n请检查网络连接或稍后重试。');
+                    }
+                });
+            }).on('error', () => {
+                resolve('# 加载失败\n\n网络错误');
+            });
+        });
+    }
+
+    /**
+     * 生成详情页 HTML
+     */
+    private _getDetailHtml(skill: Skill, markdown: string): string {
+        return `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {
+                        font-family: var(--vscode-font-family);
+                        padding: 20px;
+                        color: var(--vscode-foreground);
+                        line-height: 1.6;
+                    }
+                    pre {
+                        background: var(--vscode-textCodeBlock-background);
+                        padding: 10px;
+                        border-radius: 4px;
+                        overflow-x: auto;
+                        white-space: pre-wrap;
+                    }
+                    code {
+                        font-family: var(--vscode-editor-font-family);
+                    }
+                    h1, h2, h3 {
+                        color: var(--vscode-foreground);
+                    }
+                </style>
+            </head>
+            <body>
+                <h1>${this._escapeHtml(skill.name)}</h1>
+                <pre>${this._escapeHtml(markdown)}</pre>
+            </body>
+            </html>
+        `;
+    }
+
+    /**
+     * HTML 转义
+     */
+    private _escapeHtml(text: string): string {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
 
     public updateAccentColor() {

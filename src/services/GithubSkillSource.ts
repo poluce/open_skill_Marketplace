@@ -104,6 +104,32 @@ class GenericSkillSource {
     }
 
     /**
+     * 获取指定路径的最新 commit SHA 和时间
+     */
+    private async fetchLatestCommit(
+        owner: string,
+        repo: string,
+        branch: string,
+        path: string
+    ): Promise<{ sha: string; timestamp: number } | null> {
+        try {
+            const apiPath = `/repos/${owner}/${repo}/commits?path=${path}&sha=${branch}&per_page=1`;
+            const data = await this.fetchGithubApi(apiPath);
+            const commits = JSON.parse(data);
+
+            if (commits.length > 0) {
+                return {
+                    sha: commits[0].sha.substring(0, 7), // 短 SHA
+                    timestamp: new Date(commits[0].commit.author.date).getTime()
+                };
+            }
+        } catch (error) {
+            console.warn(`获取 commit 失败: ${path}`, error);
+        }
+        return null;
+    }
+
+    /**
      * 获取 raw 文件内容
      */
     private fetchRawContent(url: string): Promise<string> {
@@ -297,8 +323,27 @@ class GenericSkillSource {
         const results = await Promise.all(paths.map(p => this.fetchSkillsFromPath(p)));
         results.forEach(batch => allSkills.push(...batch));
 
-        console.log(`[${this.config.displayName}] 成功解析 ${allSkills.length} 个技能`);
-        return allSkills;
+        // 并行获取所有技能的 commit 信息
+        const skillsWithVersion = await Promise.all(
+            allSkills.map(async (skill) => {
+                const commitInfo = await this.fetchLatestCommit(
+                    this.config.owner,
+                    this.config.repo,
+                    this.config.branch,
+                    skill.skillPath || ''
+                );
+
+                if (commitInfo) {
+                    skill.commitSha = commitInfo.sha;
+                    skill.lastUpdated = commitInfo.timestamp;
+                }
+
+                return skill;
+            })
+        );
+
+        console.log(`[${this.config.displayName}] 成功解析 ${skillsWithVersion.length} 个技能`);
+        return skillsWithVersion;
     }
 }
 

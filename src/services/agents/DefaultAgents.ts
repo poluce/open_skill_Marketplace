@@ -14,6 +14,19 @@ export class AntigravityAgent implements IAgent {
     }
 }
 
+export class GeminiAgent implements IAgent {
+    id = 'gemini';
+    name = 'Gemini CLI';
+
+    getGlobalPath(home: string): string {
+        return path.join(home, '.gemini', 'skills');
+    }
+
+    getProjectPath(root: string): string {
+        return path.join(root, '.gemini', 'skills');
+    }
+}
+
 export class ClaudeAgent implements IAgent {
     id = 'claude';
     name = 'Claude Code CLI';
