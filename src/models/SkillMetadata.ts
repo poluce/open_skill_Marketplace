@@ -19,4 +19,10 @@ export interface SkillMetadata {
     skillPath: string;
     /** 仓库分支 */
     branch: string;
+    /** 是否被用户修改 */
+    isLocalModified?: boolean;
+    /** 最后修改时间 */
+    lastModifiedAt?: number;
+    /** 修改备注（可选） */
+    modificationNote?: string;
 }

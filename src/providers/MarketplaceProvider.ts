@@ -53,6 +53,15 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                 case 'update':
                     this._handleUpdate(data.skillId, data.skillName);
                     break;
+                case 'editSkill':
+                    this._handleEditSkill(data.skillId, data.skillName);
+                    break;
+                case 'restoreOfficial':
+                    this._handleRestoreOfficial(data.skillId, data.skillName);
+                    break;
+                case 'revealInExplorer':
+                    this._handleRevealInExplorer(data.skillId);
+                    break;
                 case 'showDetail':
                     this._showSkillDetail(data.skillId);
                     break;
@@ -111,6 +120,20 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                 if (updateInfo) {
                     skill.hasUpdate = updateInfo.hasUpdate;
                     skill.installedVersion = updateInfo.installedVersion;
+                }
+            }
+
+            // 新增：读取本地修改状态
+            for (const skill of officialSkills) {
+                if (skill.isInstalled) {
+                    const skillDir = path.join(
+                        this._installer.getInstallPath(false),
+                        this._installer.getSafeDirName(String(skill.id))
+                    );
+                    const metadata = this._installer.readMetadata(skillDir);
+                    if (metadata?.isLocalModified) {
+                        skill.isLocalModified = true;
+                    }
                 }
             }
 
@@ -493,5 +516,107 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
         html = html.replace('/*{{currentScope}}*/', currentScope);
 
         return html;
+    }
+
+    /**
+     * 处理编辑技能请求
+     */
+    private async _handleEditSkill(skillId: string | number, skillName: string) {
+        const skill = this._allSkills.find(s => String(s.id) === String(skillId));
+
+        if (!skill || !skill.isInstalled) {
+            vscode.window.showErrorMessage(`技能 "${skillName}" 未安装`);
+            return;
+        }
+
+        // 询问用户编辑方式
+        const choice = await vscode.window.showQuickPick([
+            {
+                label: '$(folder-opened) 在文件浏览器中打开',
+                description: '在系统文件浏览器中打开技能目录',
+                action: 'explorer'
+            },
+            {
+                label: '$(edit) 在 VS Code 中编辑',
+                description: '在当前窗口打开技能目录',
+                action: 'vscode'
+            }
+        ], {
+            placeHolder: `选择编辑 "${skillName}" 的方式`
+        });
+
+        if (!choice) {
+            return;
+        }
+
+        if (choice.action === 'explorer') {
+            const success = await this._installer.revealSkillInExplorer(String(skillId));
+            if (success) {
+                // 标记为本地修改
+                this._installer.markAsLocalModified(String(skillId));
+                skill.isLocalModified = true;
+                this._refreshView();
+
+                vscode.window.showInformationMessage(
+                    `已打开技能目录。编辑后，该技能将标记为"本地修改"，不再接收官方更新。`
+                );
+            }
+        } else {
+            const success = await this._installer.openSkillForEdit(String(skillId));
+            if (success) {
+                skill.isLocalModified = true;
+                this._refreshView();
+            }
+        }
+    }
+
+    /**
+     * 处理恢复官方版本请求
+     */
+    private async _handleRestoreOfficial(skillId: string | number, skillName: string) {
+        const skill = this._allSkills.find(s => String(s.id) === String(skillId));
+
+        if (!skill) {
+            vscode.window.showErrorMessage(`未找到技能: ${skillName}`);
+            return;
+        }
+
+        // 确认操作
+        const confirm = await vscode.window.showWarningMessage(
+            `确定要恢复 "${skillName}" 的官方版本吗？\n\n您的本地修改将被删除，此操作不可撤销。`,
+            { modal: true },
+            '恢复官方版本'
+        );
+
+        if (confirm !== '恢复官方版本') {
+            return;
+        }
+
+        // 使用进度条显示恢复过程
+        await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: `正在恢复 "${skillName}" 的官方版本`,
+                cancellable: false
+            },
+            async (progress) => {
+                const success = await this._installer.restoreOfficialVersion(skill);
+
+                if (success) {
+                    skill.isLocalModified = false;
+                    this._refreshView();
+                    vscode.window.showInformationMessage(`已恢复 "${skillName}" 的官方版本`);
+                }
+
+                return success;
+            }
+        );
+    }
+
+    /**
+     * 处理在文件浏览器中显示
+     */
+    private async _handleRevealInExplorer(skillId: string | number) {
+        await this._installer.revealSkillInExplorer(String(skillId));
     }
 }

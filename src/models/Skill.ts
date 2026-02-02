@@ -30,4 +30,6 @@ export interface Skill {
     hasUpdate?: boolean;
     /** 已安装的版本 SHA */
     installedVersion?: string;
+    /** 是否被用户修改（从元数据读取） */
+    isLocalModified?: boolean;
 }

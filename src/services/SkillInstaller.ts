@@ -108,7 +108,7 @@ export class SkillInstaller {
      * 将技能 ID 转换为安全的文件目录名
      * 例如: "anthropic:algorithmic-art" -> "anthropic--algorithmic-art"
      */
-    private getSafeDirName(skillId: string): string {
+    getSafeDirName(skillId: string): string {
         return skillId.replace(/:/g, '--');
     }
 
@@ -353,7 +353,7 @@ export class SkillInstaller {
     /**
      * 读取技能元数据
      */
-    private readMetadata(skillDir: string): SkillMetadata | null {
+    readMetadata(skillDir: string): SkillMetadata | null {
         try {
             const metadataPath = path.join(skillDir, '.metadata.json');
             if (fs.existsSync(metadataPath)) {
@@ -414,6 +414,11 @@ export class SkillInstaller {
 
             if (!metadata) {continue;}
 
+            // 新增：跳过本地修改的技能
+            if (metadata.isLocalModified) {
+                continue;
+            }
+
             // 从 allSkills 中找到对应的技能（包含最新 commitSha）
             const latestSkill = allSkills.find(s => String(s.id) === metadata!.skillId);
 
@@ -429,6 +434,81 @@ export class SkillInstaller {
         }
 
         return updateMap;
+    }
+
+    /**
+     * 标记技能为本地修改
+     */
+    markAsLocalModified(skillId: string, note?: string): boolean {
+        const skillDir = path.join(this.getInstallPath(), this.getSafeDirName(skillId));
+        const metadata = this.readMetadata(skillDir);
+
+        if (!metadata) {
+            return false;
+        }
+
+        metadata.isLocalModified = true;
+        metadata.lastModifiedAt = Date.now();
+        if (note) {
+            metadata.modificationNote = note;
+        }
+
+        const metadataPath = path.join(skillDir, '.metadata.json');
+        fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
+
+        return true;
+    }
+
+    /**
+     * 在文件浏览器中打开技能目录
+     */
+    async revealSkillInExplorer(skillId: string): Promise<boolean> {
+        const skillDir = path.join(this.getInstallPath(), this.getSafeDirName(skillId));
+
+        if (!fs.existsSync(skillDir)) {
+            return false;
+        }
+
+        const uri = vscode.Uri.file(skillDir);
+        await vscode.commands.executeCommand('revealFileInOS', uri);
+
+        return true;
+    }
+
+    /**
+     * 打开技能目录进行编辑
+     */
+    async openSkillForEdit(skillId: string): Promise<boolean> {
+        const skillDir = path.join(this.getInstallPath(), this.getSafeDirName(skillId));
+
+        if (!fs.existsSync(skillDir)) {
+            return false;
+        }
+
+        // 标记为本地修改
+        this.markAsLocalModified(skillId);
+
+        // 在 VS Code 中打开技能目录
+        const uri = vscode.Uri.file(skillDir);
+        await vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: false });
+
+        return true;
+    }
+
+    /**
+     * 恢复官方版本（删除本地修改）
+     */
+    async restoreOfficialVersion(skill: Skill): Promise<boolean> {
+        const skillId = String(skill.id);
+        const skillDir = path.join(this.getInstallPath(), this.getSafeDirName(skillId));
+
+        // 删除本地版本
+        if (fs.existsSync(skillDir)) {
+            fs.rmSync(skillDir, { recursive: true, force: true });
+        }
+
+        // 重新安装官方版本
+        return await this.installSkill(skill);
     }
 
     /**
