@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { promises as fsPromises } from 'fs';
 import * as https from 'https';
 import * as http from 'http';
 import * as os from 'os';
+import { execSync } from 'child_process';
 import { Skill } from '../models/Skill';
 import { SkillMetadata } from '../models/SkillMetadata';
 
@@ -17,6 +19,119 @@ import { AgentManager } from './AgentManager';
  * 负责将技能从 GitHub 下载并安装到本地目录
  */
 export class SkillInstaller {
+    private gitAvailable: boolean | null = null;
+
+    /**
+     * 检测 git 是否可用
+     */
+    private isGitAvailable(): boolean {
+        if (this.gitAvailable !== null) {
+            return this.gitAvailable;
+        }
+
+        try {
+            execSync('git --version', { stdio: 'ignore' });
+            this.gitAvailable = true;
+            return true;
+        } catch (error) {
+            this.gitAvailable = false;
+            console.warn('Git 不可用，技能修改检测功能将受限');
+            return false;
+        }
+    }
+
+    /**
+     * 创建 Junction（目录联接）
+     * @param target 目标目录（实际文件所在）
+     * @param link Junction 路径
+     */
+    createJunction(target: string, link: string): boolean {
+        try {
+            console.log(`创建 Junction: ${link} -> ${target}`);
+
+            // 如果 link 已存在，先删除
+            if (fs.existsSync(link)) {
+                console.log(`Junction 路径已存在，先删除: ${link}`);
+                if (this.isJunction(link)) {
+                    this.removeJunction(link);
+                } else {
+                    fs.rmSync(link, { recursive: true, force: true });
+                }
+            }
+
+            // Windows: mklink /J
+            // Linux/Mac: ln -s
+            if (process.platform === 'win32') {
+                const cmd = `mklink /J "${link}" "${target}"`;
+                console.log(`执行命令: ${cmd}`);
+                execSync(cmd, { shell: 'cmd.exe' });
+            } else {
+                execSync(`ln -s "${target}" "${link}"`);
+            }
+            console.log('Junction 创建成功');
+            return true;
+        } catch (error) {
+            console.error('创建 Junction 失败:', error);
+            vscode.window.showWarningMessage(`创建 Junction 失败: ${error instanceof Error ? error.message : String(error)}`);
+            return false;
+        }
+    }
+
+    /**
+     * 检查路径是否是 Junction
+     */
+    private isJunction(dirPath: string): boolean {
+        try {
+            const stats = fs.lstatSync(dirPath);
+            return stats.isSymbolicLink();
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * 删除 Junction（不会删除目标内容）
+     */
+    removeJunction(junctionPath: string): boolean {
+        try {
+            if (!fs.existsSync(junctionPath)) {
+                return true;
+            }
+
+            if (!this.isJunction(junctionPath)) {
+                console.warn(`${junctionPath} 不是 Junction，跳过删除`);
+                return false;
+            }
+
+            // Windows: rmdir（不会删除目标内容）
+            // Linux/Mac: unlink
+            if (process.platform === 'win32') {
+                execSync(`rmdir "${junctionPath}"`, { stdio: 'ignore', shell: 'cmd.exe' });
+            } else {
+                fs.unlinkSync(junctionPath);
+            }
+            return true;
+        } catch (error) {
+            console.error('删除 Junction 失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 更新元数据中的 junctionPath
+     */
+    updateMetadataJunctionPath(skillDir: string, junctionPath: string): void {
+        try {
+            const metadataPath = path.join(skillDir, '.metadata.json');
+            if (fs.existsSync(metadataPath)) {
+                const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+                metadata.junctionPath = junctionPath;
+                fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
+            }
+        } catch (error) {
+            console.warn('更新元数据失败:', error);
+        }
+    }
 
     /**
      * 获取安装目标路径，并执行环境校验
@@ -156,18 +271,35 @@ export class SkillInstaller {
 
     /**
      * 删除已安装的技能
+     * @param storagePath 可选的扩展存储路径（用于 Junction 模式）
      */
-    uninstallSkill(skillId: string, skillName: string): boolean {
-        const skillDir = path.join(this.getInstallPath(), this.getSafeDirName(skillId));
+    async uninstallSkill(skillId: string, skillName: string, storagePath?: string): Promise<boolean> {
+        const safeDirName = this.getSafeDirName(skillId);
+        const junctionDir = path.join(this.getInstallPath(), safeDirName);
+        const actualDir = storagePath
+            ? path.join(storagePath, safeDirName)
+            : junctionDir;
 
-        if (!fs.existsSync(skillDir)) {
+        if (!fs.existsSync(junctionDir) && !fs.existsSync(actualDir)) {
             vscode.window.showWarningMessage(`技能 "${skillName}" 未安装`);
             return false;
         }
 
         try {
-            // 递归删除目录
-            fs.rmSync(skillDir, { recursive: true, force: true });
+            // 1. 删除 Junction（如果是 Junction）
+            if (storagePath && this.isJunction(junctionDir)) {
+                this.removeJunction(junctionDir);
+            } else if (fs.existsSync(junctionDir) && !storagePath) {
+                // 非 Junction 模式，直接删除目录
+                await this.safeRemoveDir(junctionDir);
+                return true;
+            }
+
+            // 2. 删除实际目录
+            if (fs.existsSync(actualDir)) {
+                await this.safeRemoveDir(actualDir);
+            }
+
             return true;
         } catch (error) {
             const errMsg = error instanceof Error ? error.message : String(error);
@@ -180,10 +312,19 @@ export class SkillInstaller {
      * 安装技能
      * @param skill 完整的 Skill 对象，包含仓库信息
      * @param onProgress 可选的进度回调函数
+     * @param storagePath 可选的扩展存储路径（用于 Junction 模式）
      */
-    async installSkill(skill: Skill, onProgress?: (current: number, total: number) => void): Promise<boolean> {
+    async installSkill(skill: Skill, onProgress?: (current: number, total: number) => void, storagePath?: string): Promise<boolean> {
         const skillId = String(skill.id);
-        const targetDir = path.join(this.getInstallPath(), this.getSafeDirName(skillId));
+        const safeDirName = this.getSafeDirName(skillId);
+
+        // 实际文件存储在扩展存储目录（如果提供了 storagePath）
+        const actualDir = storagePath
+            ? path.join(storagePath, safeDirName)
+            : path.join(this.getInstallPath(), safeDirName);
+
+        // 用户目录的 Junction 路径
+        const junctionDir = path.join(this.getInstallPath(), safeDirName);
 
         const config = vscode.workspace.getConfiguration('antigravity');
         const scope = config.get<string>('installScope', 'global');
@@ -205,9 +346,9 @@ export class SkillInstaller {
                 throw new Error('没有找到可安装的文件');
             }
 
-            // 2. 创建目标目录
-            if (!fs.existsSync(targetDir)) {
-                fs.mkdirSync(targetDir, { recursive: true });
+            // 2. 创建实际存储目录
+            if (!fs.existsSync(actualDir)) {
+                fs.mkdirSync(actualDir, { recursive: true });
             }
 
             // 3. 下载所有文件（串行下载以便追踪进度）
@@ -215,27 +356,45 @@ export class SkillInstaller {
             const total = files.length;
 
             for (const file of files) {
-                await this.downloadFile(skill, file.path, path.join(targetDir, file.name));
+                await this.downloadFile(skill, file.path, path.join(actualDir, file.name));
                 completed++;
                 if (onProgress) {
                     onProgress(completed, total);
                 }
             }
 
-            // 4. 保存元数据
-            this.saveMetadata(skill, targetDir);
+            // 4. 保存元数据（包含 junctionPath）
+            this.saveMetadata(skill, actualDir, storagePath ? junctionDir : undefined);
 
-            vscode.window.showInformationMessage(`技能 "${skill.name}" 已安装到 ${targetDir}`);
+            // 5. 初始化 git 仓库并提交初始版本
+            await this.initGitRepo(actualDir);
+
+            // 6. 如果使用存储路径，创建 Junction
+            if (storagePath && actualDir !== junctionDir) {
+                // 确保用户目录存在
+                const userSkillsDir = this.getInstallPath();
+                if (!fs.existsSync(userSkillsDir)) {
+                    fs.mkdirSync(userSkillsDir, { recursive: true });
+                }
+
+                // 创建 Junction
+                const junctionSuccess = this.createJunction(actualDir, junctionDir);
+                if (!junctionSuccess) {
+                    console.warn('创建 Junction 失败，技能仍可通过实际路径访问');
+                }
+            }
+
+            vscode.window.showInformationMessage(`技能 "${skill.name}" 已安装到 ${junctionDir}`);
             return true;
 
         } catch (error) {
             const errMsg = error instanceof Error ? error.message : String(error);
 
             // 错误恢复：删除半成品目录
-            if (fs.existsSync(targetDir)) {
+            if (fs.existsSync(actualDir)) {
                 try {
-                    fs.rmSync(targetDir, { recursive: true, force: true });
-                    console.log(`已清理失败的安装目录: ${targetDir}`);
+                    fs.rmSync(actualDir, { recursive: true, force: true });
+                    console.log(`已清理失败的安装目录: ${actualDir}`);
                 } catch (cleanupError) {
                     console.error('清理失败目录时出错:', cleanupError);
                 }
@@ -334,7 +493,7 @@ export class SkillInstaller {
     /**
      * 保存技能安装元数据
      */
-    private saveMetadata(skill: Skill, targetDir: string): void {
+    private saveMetadata(skill: Skill, targetDir: string, junctionPath?: string): void {
         const metadata: SkillMetadata = {
             skillId: String(skill.id),
             installedVersion: skill.commitSha || 'unknown',
@@ -345,6 +504,10 @@ export class SkillInstaller {
             skillPath: skill.skillPath || '',
             branch: skill.branch || 'main'
         };
+
+        if (junctionPath) {
+            metadata.junctionPath = junctionPath;
+        }
 
         const metadataPath = path.join(targetDir, '.metadata.json');
         fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
@@ -363,6 +526,70 @@ export class SkillInstaller {
             console.warn('读取元数据失败:', error);
         }
         return null;
+    }
+
+    /**
+     * 初始化 git 仓库并提交初始版本
+     */
+    private async initGitRepo(skillDir: string): Promise<void> {
+        if (!this.isGitAvailable()) {
+            return; // git 不可用，跳过
+        }
+
+        try {
+            // 初始化 git 仓库
+            execSync('git init', { cwd: skillDir, stdio: 'ignore' });
+
+            // 设置临时用户信息（避免全局配置缺失导致提交失败）
+            execSync('git config user.name "Skill Marketplace"', { cwd: skillDir, stdio: 'ignore' });
+            execSync('git config user.email "marketplace@local"', { cwd: skillDir, stdio: 'ignore' });
+
+            // 添加所有文件
+            execSync('git add -A', { cwd: skillDir, stdio: 'ignore' });
+
+            // 提交初始版本（禁用 GPG 签名）
+            execSync('git commit --no-gpg-sign -m "Initial install from marketplace"', { cwd: skillDir, stdio: 'ignore' });
+        } catch (error) {
+            console.warn('初始化 git 仓库失败:', error);
+        }
+    }
+
+    /**
+     * 检测技能是否有本地修改（通过 git status）
+     */
+    checkLocalModified(skillDir: string): boolean {
+        try {
+            const gitDir = path.join(skillDir, '.git');
+            if (!fs.existsSync(gitDir)) {
+                return false; // 没有 git 仓库，无法检测
+            }
+            // git status --porcelain 返回空字符串表示没有修改
+            const status = execSync('git status --porcelain', { cwd: skillDir, encoding: 'utf8' });
+            return status.trim().length > 0;
+        } catch (error) {
+            console.warn('检测本地修改失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 恢复技能到官方版本（通过 git checkout）
+     */
+    async restoreToOfficialVersion(skillDir: string): Promise<boolean> {
+        try {
+            const gitDir = path.join(skillDir, '.git');
+            if (!fs.existsSync(gitDir)) {
+                return false;
+            }
+            // 恢复所有文件到初始状态
+            execSync('git checkout .', { cwd: skillDir, stdio: 'ignore' });
+            // 清理未跟踪的文件
+            execSync('git clean -fd', { cwd: skillDir, stdio: 'ignore' });
+            return true;
+        } catch (error) {
+            console.warn('恢复官方版本失败:', error);
+            return false;
+        }
     }
 
     /**
@@ -437,29 +664,6 @@ export class SkillInstaller {
     }
 
     /**
-     * 标记技能为本地修改
-     */
-    markAsLocalModified(skillId: string, note?: string): boolean {
-        const skillDir = path.join(this.getInstallPath(), this.getSafeDirName(skillId));
-        const metadata = this.readMetadata(skillDir);
-
-        if (!metadata) {
-            return false;
-        }
-
-        metadata.isLocalModified = true;
-        metadata.lastModifiedAt = Date.now();
-        if (note) {
-            metadata.modificationNote = note;
-        }
-
-        const metadataPath = path.join(skillDir, '.metadata.json');
-        fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
-
-        return true;
-    }
-
-    /**
      * 在文件浏览器中打开技能目录
      */
     async revealSkillInExplorer(skillId: string): Promise<boolean> {
@@ -485,46 +689,115 @@ export class SkillInstaller {
             return false;
         }
 
-        // 标记为本地修改
-        this.markAsLocalModified(skillId);
-
-        // 在 VS Code 中打开技能目录
-        const uri = vscode.Uri.file(skillDir);
-        await vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: false });
+        // 打开 SKILL.md 文件进行编辑（而不是整个目录，避免文件占用）
+        const skillMdPath = path.join(skillDir, 'SKILL.md');
+        if (fs.existsSync(skillMdPath)) {
+            const uri = vscode.Uri.file(skillMdPath);
+            await vscode.commands.executeCommand('vscode.open', uri);
+        } else {
+            // 如果没有 SKILL.md，则在文件资源管理器中显示目录
+            const uri = vscode.Uri.file(skillDir);
+            await vscode.commands.executeCommand('revealFileInOS', uri);
+        }
 
         return true;
     }
 
     /**
-     * 恢复官方版本（删除本地修改）
+     * 安全删除目录（带重试逻辑，解决 Windows 文件占用问题）
      */
-    async restoreOfficialVersion(skill: Skill): Promise<boolean> {
-        const skillId = String(skill.id);
-        const skillDir = path.join(this.getInstallPath(), this.getSafeDirName(skillId));
+    private async safeRemoveDir(dirPath: string, maxRetries: number = 5): Promise<void> {
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                if (fs.existsSync(dirPath)) {
+                    await fsPromises.rm(dirPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+                }
+                return; // 成功删除，退出
+            } catch (error: any) {
+                if (i === maxRetries - 1) {
+                    // 最后一次重试失败，抛出错误
+                    throw new Error(`无法删除目录 ${dirPath}: ${error.message}\n\n可能原因：文件被占用（请关闭相关文件或文件夹）`);
+                }
+                // 指数退避：200ms, 400ms, 800ms, 1600ms
+                const delay = 200 * Math.pow(2, i);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
 
-        // 删除本地版本
-        if (fs.existsSync(skillDir)) {
-            fs.rmSync(skillDir, { recursive: true, force: true });
+    /**
+     * 恢复官方版本（优先使用 git 恢复，否则重新安装）
+     * @param storagePath 可选的扩展存储路径（用于 Junction 模式）
+     */
+    async restoreOfficialVersion(skill: Skill, storagePath?: string): Promise<boolean> {
+        const skillId = String(skill.id);
+        const safeDirName = this.getSafeDirName(skillId);
+
+        // 实际文件目录
+        const actualDir = storagePath
+            ? path.join(storagePath, safeDirName)
+            : path.join(this.getInstallPath(), safeDirName);
+
+        // 优先尝试 git 恢复（更快，不需要重新下载）
+        const gitDir = path.join(actualDir, '.git');
+        if (fs.existsSync(gitDir)) {
+            const success = await this.restoreToOfficialVersion(actualDir);
+            if (success) {
+                vscode.window.showInformationMessage(`技能 "${skill.name}" 已恢复到官方版本`);
+                return true;
+            }
         }
 
-        // 重新安装官方版本
-        return await this.installSkill(skill);
+        // git 恢复失败或没有 git 仓库，则删除后重新安装
+        try {
+            await this.safeRemoveDir(actualDir);
+
+            // 如果是 Junction 模式，也删除 Junction
+            if (storagePath) {
+                const junctionDir = path.join(this.getInstallPath(), safeDirName);
+                if (this.isJunction(junctionDir)) {
+                    this.removeJunction(junctionDir);
+                }
+            }
+        } catch (error: any) {
+            vscode.window.showErrorMessage(error.message);
+            return false;
+        }
+
+        return await this.installSkill(skill, undefined, storagePath);
     }
 
     /**
      * 更新技能（先删除后重新安装）
+     * @param storagePath 可选的扩展存储路径（用于 Junction 模式）
      */
-    async updateSkill(skill: Skill, onProgress?: (current: number, total: number) => void): Promise<boolean> {
+    async updateSkill(skill: Skill, onProgress?: (current: number, total: number) => void, storagePath?: string): Promise<boolean> {
         const skillId = String(skill.id);
-        const skillDir = path.join(this.getInstallPath(), this.getSafeDirName(skillId));
+        const safeDirName = this.getSafeDirName(skillId);
 
-        // 删除旧版本
-        if (fs.existsSync(skillDir)) {
-            fs.rmSync(skillDir, { recursive: true, force: true });
+        // 实际文件目录
+        const actualDir = storagePath
+            ? path.join(storagePath, safeDirName)
+            : path.join(this.getInstallPath(), safeDirName);
+
+        // 删除旧版本（使用安全删除方法）
+        try {
+            await this.safeRemoveDir(actualDir);
+
+            // 如果是 Junction 模式，也删除 Junction
+            if (storagePath) {
+                const junctionDir = path.join(this.getInstallPath(), safeDirName);
+                if (this.isJunction(junctionDir)) {
+                    this.removeJunction(junctionDir);
+                }
+            }
+        } catch (error: any) {
+            vscode.window.showErrorMessage(error.message);
+            return false;
         }
 
         // 重新安装
-        const success = await this.installSkill(skill, onProgress);
+        const success = await this.installSkill(skill, onProgress, storagePath);
 
         if (success) {
             vscode.window.showInformationMessage(`技能 "${skill.name}" 已更新到最新版本`);

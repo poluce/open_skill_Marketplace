@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { Skill } from '../models/Skill';
 import { GithubSkillSource } from '../services/GithubSkillSource';
 import { SkillInstaller } from '../services/SkillInstaller';
@@ -14,13 +15,45 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
     private _installer: SkillInstaller;
     private _translator: TranslationService;
     private _allSkills: Skill[] = [];
+    private _fileWatcher?: vscode.FileSystemWatcher;
+    private _storageWatcher?: vscode.FileSystemWatcher;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
+        private readonly _globalStorageUri: vscode.Uri,
     ) {
         this._githubSource = new GithubSkillSource();
         this._installer = new SkillInstaller();
         this._translator = new TranslationService();
+    }
+
+    /**
+     * 清理资源
+     */
+    public dispose(): void {
+        if (this._fileWatcher) {
+            this._fileWatcher.dispose();
+        }
+        if (this._storageWatcher) {
+            this._storageWatcher.dispose();
+        }
+    }
+
+    /**
+     * 获取技能实际存储路径
+     * 优先使用 ~/.skill-marketplace/skills，权限不足时回退到 VS Code 存储目录
+     */
+    private getSkillStoragePath(): string {
+        const preferredPath = path.join(os.homedir(), '.skill-marketplace', 'skills');
+        try {
+            if (!fs.existsSync(preferredPath)) {
+                fs.mkdirSync(preferredPath, { recursive: true });
+            }
+            return preferredPath;
+        } catch {
+            // 权限不足时回退到 VS Code 存储目录
+            return path.join(this._globalStorageUri.fsPath, 'skills');
+        }
     }
 
     public async resolveWebviewView(
@@ -99,6 +132,149 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
         });
 
         this.updateAccentColor();
+
+        // 监听配置变更，迁移 Junction
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('antigravity.agentType') ||
+                e.affectsConfiguration('antigravity.installScope')) {
+                this._migrateJunctions();
+            }
+        });
+
+        // 设置文件监听器，监控技能目录的文件变化
+        this._setupFileWatcher();
+    }
+
+    /**
+     * 配置变更时迁移 Junction
+     * 实际文件位置固定在扩展存储目录，只需重建 Junction 到新的用户目录
+     */
+    private async _migrateJunctions(): Promise<void> {
+        const skillsStoragePath = this.getSkillStoragePath();
+
+        if (!fs.existsSync(skillsStoragePath)) {
+            return;
+        }
+
+        // 获取所有已安装技能
+        const skillDirs = fs.readdirSync(skillsStoragePath, { withFileTypes: true })
+            .filter(d => d.isDirectory())
+            .map(d => d.name);
+
+        if (skillDirs.length === 0) {
+            return;
+        }
+
+        // 获取新的用户目录
+        const newInstallPath = this._installer.getInstallPath(false);
+        if (!newInstallPath) {
+            return;
+        }
+
+        // 确保新目录存在
+        if (!fs.existsSync(newInstallPath)) {
+            fs.mkdirSync(newInstallPath, { recursive: true });
+        }
+
+        // 为每个技能创建 Junction
+        for (const skillDir of skillDirs) {
+            const actualPath = path.join(skillsStoragePath, skillDir);
+            const junctionPath = path.join(newInstallPath, skillDir);
+
+            // 读取元数据，清理旧的 Junction
+            const metadata = this._installer.readMetadata(actualPath);
+            if (metadata?.junctionPath && metadata.junctionPath !== junctionPath) {
+                // 删除旧的 Junction
+                this._installer.removeJunction(metadata.junctionPath);
+            }
+
+            // 如果 Junction 已存在，跳过
+            if (fs.existsSync(junctionPath)) {
+                continue;
+            }
+
+            // 创建 Junction
+            const success = this._installer.createJunction(actualPath, junctionPath);
+            if (success) {
+                // 更新元数据中的 junctionPath
+                this._installer.updateMetadataJunctionPath(actualPath, junctionPath);
+            }
+        }
+
+        // 重新设置文件监听器（监听新目录）
+        this._setupFileWatcher();
+    }
+
+    /**
+     * 设置文件监听器，监控已安装技能目录的文件变化
+     */
+    private _setupFileWatcher(): void {
+        // 清理旧的监听器
+        if (this._fileWatcher) {
+            this._fileWatcher.dispose();
+        }
+        if (this._storageWatcher) {
+            this._storageWatcher.dispose();
+        }
+
+        // 防抖：避免频繁刷新
+        let debounceTimer: NodeJS.Timeout | undefined;
+        const debouncedRefresh = () => {
+            if (debounceTimer) {
+                clearTimeout(debounceTimer);
+            }
+            debounceTimer = setTimeout(() => {
+                console.log('文件变化检测，更新本地修改状态');
+                this._updateLocalModifiedStatus();
+            }, 500);
+        };
+
+        // 监听实际存储目录（这是主要的监听目标）
+        const storagePath = this.getSkillStoragePath();
+        if (storagePath && fs.existsSync(storagePath)) {
+            const storagePattern = new vscode.RelativePattern(storagePath, '**/*');
+            this._storageWatcher = vscode.workspace.createFileSystemWatcher(storagePattern);
+            this._storageWatcher.onDidChange(debouncedRefresh);
+            this._storageWatcher.onDidCreate(debouncedRefresh);
+            this._storageWatcher.onDidDelete(debouncedRefresh);
+            console.log('已设置存储目录监听器:', storagePath);
+        }
+
+        // 也监听 Junction 目录（备用）
+        const installPath = this._installer.getInstallPath(false);
+        if (installPath && fs.existsSync(installPath)) {
+            const pattern = new vscode.RelativePattern(installPath, '**/*');
+            this._fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
+            this._fileWatcher.onDidChange(debouncedRefresh);
+            this._fileWatcher.onDidCreate(debouncedRefresh);
+            this._fileWatcher.onDidDelete(debouncedRefresh);
+        }
+    }
+
+    /**
+     * 更新所有已安装技能的本地修改状态
+     */
+    private _updateLocalModifiedStatus(): void {
+        const installPath = this._installer.getInstallPath(false);
+        if (!installPath) {
+            return;
+        }
+
+        let hasChanges = false;
+        for (const skill of this._allSkills) {
+            if (skill.isInstalled) {
+                const skillDir = path.join(installPath, this._installer.getSafeDirName(String(skill.id)));
+                const isModified = this._installer.checkLocalModified(skillDir);
+                if (skill.isLocalModified !== isModified) {
+                    skill.isLocalModified = isModified;
+                    hasChanges = true;
+                }
+            }
+        }
+
+        if (hasChanges) {
+            this._refreshView();
+        }
     }
 
     /**
@@ -123,17 +299,15 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                 }
             }
 
-            // 新增：读取本地修改状态
+            // 新增：使用 git 检测本地修改状态
             for (const skill of officialSkills) {
                 if (skill.isInstalled) {
                     const skillDir = path.join(
                         this._installer.getInstallPath(false),
                         this._installer.getSafeDirName(String(skill.id))
                     );
-                    const metadata = this._installer.readMetadata(skillDir);
-                    if (metadata?.isLocalModified) {
-                        skill.isLocalModified = true;
-                    }
+                    // 使用 git status 检测是否有本地修改
+                    skill.isLocalModified = this._installer.checkLocalModified(skillDir);
                 }
             }
 
@@ -252,7 +426,7 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                         increment: 100 / total,
                         message: `${current}/${total} 文件 (${percentage}%)`
                     });
-                });
+                }, this.getSkillStoragePath());
 
                 if (success) {
                     // 更新已安装状态并刷新视图
@@ -276,7 +450,7 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
         }
 
         // 执行删除
-        const success = this._installer.uninstallSkill(String(skillId), skillName);
+        const success = await this._installer.uninstallSkill(String(skillId), skillName, this.getSkillStoragePath());
 
         if (success) {
             skill.isInstalled = false;
@@ -309,7 +483,7 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                         increment: 100 / total,
                         message: `${current}/${total} 文件 (${percentage}%)`
                     });
-                });
+                }, this.getSkillStoragePath());
 
                 if (success) {
                     skill.hasUpdate = false;
@@ -333,18 +507,67 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
             return;
         }
 
-        // 创建 WebView Panel
-        const panel = vscode.window.createWebviewPanel(
-            'skillDetail',
-            skill.name,
-            vscode.ViewColumn.One,
-            { enableScripts: true }
-        );
+        try {
+            let filePath: string;
 
-        // 获取 README 内容
-        const readmeContent = await this._fetchSkillReadme(skill);
+            // 如果已安装，打开实际安装的文件（可编辑，修改能被检测）
+            if (skill.isInstalled) {
+                const installPath = this._installer.getInstallPath(false);
+                if (installPath) {
+                    filePath = path.join(installPath, this._installer.getSafeDirName(String(skill.id)), 'SKILL.md');
 
-        panel.webview.html = this._getDetailHtml(skill, readmeContent);
+                    if (fs.existsSync(filePath)) {
+                        // 打开实际安装的文件
+                        const doc = await vscode.workspace.openTextDocument(filePath);
+                        await vscode.window.showTextDocument(doc, {
+                            viewColumn: vscode.ViewColumn.One,
+                            preview: false  // 非预览模式，可编辑
+                        });
+
+                        // 自动打开 Markdown 预览
+                        await vscode.commands.executeCommand('markdown.showPreviewToSide');
+                        return;
+                    }
+                }
+            }
+
+            // 未安装时，打开缓存文件（只读预览）
+            const cacheDir = path.join(os.homedir(), '.gemini', 'skill_cache');
+            if (!fs.existsSync(cacheDir)) {
+                fs.mkdirSync(cacheDir, { recursive: true });
+            }
+
+            // 使用技能 ID 作为文件名（确保唯一性）
+            const safeSkillId = String(skill.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+            const cacheFilePath = path.join(cacheDir, `${safeSkillId}.md`);
+
+            // 检查缓存是否存在且未过期（24小时）
+            let needsDownload = true;
+            if (fs.existsSync(cacheFilePath)) {
+                const stats = fs.statSync(cacheFilePath);
+                const ageInHours = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60);
+                needsDownload = ageInHours > 24;
+            }
+
+            if (needsDownload) {
+                // 缓存不存在或已过期，下载并保存
+                const readmeContent = await this._fetchSkillReadme(skill);
+                fs.writeFileSync(cacheFilePath, readmeContent, 'utf-8');
+            }
+
+            // 将缓存文件设置为只读
+            try {
+                fs.chmodSync(cacheFilePath, 0o444); // 只读权限
+            } catch (error) {
+                console.warn('设置文件只读失败:', error);
+            }
+
+            // 未安装时只打开 Markdown 预览（只读），不打开源文件编辑器
+            const uri = vscode.Uri.file(cacheFilePath);
+            await vscode.commands.executeCommand('markdown.showPreview', uri);
+        } catch (error) {
+            vscode.window.showErrorMessage(`无法打开技能详情: ${error}`);
+        }
     }
 
     /**
@@ -370,56 +593,6 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                 resolve('# 加载失败\n\n网络错误');
             });
         });
-    }
-
-    /**
-     * 生成详情页 HTML
-     */
-    private _getDetailHtml(skill: Skill, markdown: string): string {
-        return `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    body {
-                        font-family: var(--vscode-font-family);
-                        padding: 20px;
-                        color: var(--vscode-foreground);
-                        line-height: 1.6;
-                    }
-                    pre {
-                        background: var(--vscode-textCodeBlock-background);
-                        padding: 10px;
-                        border-radius: 4px;
-                        overflow-x: auto;
-                        white-space: pre-wrap;
-                    }
-                    code {
-                        font-family: var(--vscode-editor-font-family);
-                    }
-                    h1, h2, h3 {
-                        color: var(--vscode-foreground);
-                    }
-                </style>
-            </head>
-            <body>
-                <h1>${this._escapeHtml(skill.name)}</h1>
-                <pre>${this._escapeHtml(markdown)}</pre>
-            </body>
-            </html>
-        `;
-    }
-
-    /**
-     * HTML 转义
-     */
-    private _escapeHtml(text: string): string {
-        return text
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
     }
 
     public updateAccentColor() {
@@ -552,21 +725,12 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
         if (choice.action === 'explorer') {
             const success = await this._installer.revealSkillInExplorer(String(skillId));
             if (success) {
-                // 标记为本地修改
-                this._installer.markAsLocalModified(String(skillId));
-                skill.isLocalModified = true;
-                this._refreshView();
-
                 vscode.window.showInformationMessage(
-                    `已打开技能目录。编辑后，该技能将标记为"本地修改"，不再接收官方更新。`
+                    `已打开技能目录。编辑文件后，刷新列表即可看到"本地修改"标记。`
                 );
             }
         } else {
-            const success = await this._installer.openSkillForEdit(String(skillId));
-            if (success) {
-                skill.isLocalModified = true;
-                this._refreshView();
-            }
+            await this._installer.openSkillForEdit(String(skillId));
         }
     }
 
@@ -600,10 +764,14 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
                 cancellable: false
             },
             async (progress) => {
-                const success = await this._installer.restoreOfficialVersion(skill);
+                const success = await this._installer.restoreOfficialVersion(skill, this.getSkillStoragePath());
 
                 if (success) {
+                    // 更新技能状态：恢复后不再是本地修改，且是最新版本
                     skill.isLocalModified = false;
+                    skill.hasUpdate = false;
+                    skill.installedVersion = skill.commitSha;
+                    skill.isInstalled = true;
                     this._refreshView();
                     vscode.window.showInformationMessage(`已恢复 "${skillName}" 的官方版本`);
                 }

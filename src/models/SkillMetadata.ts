@@ -25,4 +25,8 @@ export interface SkillMetadata {
     lastModifiedAt?: number;
     /** 修改备注（可选） */
     modificationNote?: string;
+    /** 安装时的文件哈希值（用于检测本地修改） */
+    fileHashes?: Record<string, string>;
+    /** 当前 Junction 的位置（用于配置变更时清理） */
+    junctionPath?: string;
 }

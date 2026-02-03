@@ -181,13 +181,13 @@ function createSkillCard(s) {
     let actionBtn = '';
     if (s.isInstalled) {
         if (s.isLocalModified) {
-            // 本地修改的技能：显示"编辑"和"恢复官方版本"按钮
+            // 本地修改的技能：显示"编辑"和"删除"按钮（恢复按钮已移到标题行）
             actionBtn = `
                 <button class="btn-edit" onclick="editSkill('${s.id}', '${escapeHtml(s.name)}')">
                     编辑
                 </button>
-                <button class="btn-restore" onclick="restoreOfficial('${s.id}', '${escapeHtml(s.name)}')">
-                    恢复官方版本
+                <button class="btn-uninstall" onclick="uninstallSkill('${s.id}', '${escapeHtml(s.name)}')">
+                    删除
                 </button>
             `;
         } else if (s.hasUpdate) {
@@ -238,7 +238,16 @@ function createSkillCard(s) {
             <div class="skill-icon" style="${bgStyle}">${iconContent}</div>
             <div class="skill-info">
                 <div class="skill-header">
-                    <div class="skill-name">${s.name}${s.isLocalModified ? '<span class="local-modified-tag">本地修改</span>' : ''}</div>
+                    <div class="skill-name">
+                        ${s.name}
+                        ${s.isLocalModified ? `
+                            <span class="local-modified-tag">本地修改</span>
+                            <button class="btn-restore-inline" onclick="restoreOfficial('${s.id}', '${escapeHtml(s.name)}')">
+                                恢复
+                            </button>
+                        ` : ''}
+                    </div>
+                    ${repoBtn}
                 </div>
                 <div class="skill-desc">${
                     currentLanguage === "zh-CN" && s.translatedDesc
@@ -247,7 +256,6 @@ function createSkillCard(s) {
                 }</div>
             </div>
             <div class="btn-group">
-                ${repoBtn}
                 ${actionBtn}
             </div>
         </div>
