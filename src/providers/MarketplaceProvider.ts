@@ -2,10 +2,21 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import { Skill } from '../models/Skill';
 import { GithubSkillSource } from '../services/GithubSkillSource';
 import { SkillInstaller } from '../services/SkillInstaller';
 import { TranslationService } from '../services/TranslationService';
+
+/**
+ * 预览缓存元数据
+ */
+interface PreviewCacheMeta {
+    [filename: string]: {
+        hash: string;           // 内容 MD5 哈希
+        downloadedAt: number;   // 下载时间戳
+    };
+}
 
 export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider {
 
@@ -285,6 +296,11 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
             const result = await this._githubSource.fetchSkillList();
             const officialSkills = result.skills;
             const isRateLimited = result.isRateLimited;
+            const fromCache = result.fromCache;
+
+            if (fromCache) {
+                console.log('技能列表来自本地缓存（ETag 验证通过）');
+            }
 
             // 标记已安装状态
             this._updateInstalledStatus(officialSkills);
@@ -532,27 +548,23 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
             }
 
             // 未安装时，打开缓存文件（只读预览）
-            const cacheDir = path.join(os.homedir(), '.gemini', 'skill_cache');
+            const cacheDir = this._getPreviewCacheDir();
             if (!fs.existsSync(cacheDir)) {
                 fs.mkdirSync(cacheDir, { recursive: true });
             }
 
             // 使用技能 ID 作为文件名（确保唯一性）
             const safeSkillId = String(skill.id).replace(/[^a-zA-Z0-9_-]/g, '_');
-            const cacheFilePath = path.join(cacheDir, `${safeSkillId}.md`);
+            const filename = `${safeSkillId}.md`;
+            const cacheFilePath = path.join(cacheDir, filename);
 
-            // 检查缓存是否存在且未过期（24小时）
-            let needsDownload = true;
-            if (fs.existsSync(cacheFilePath)) {
-                const stats = fs.statSync(cacheFilePath);
-                const ageInHours = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60);
-                needsDownload = ageInHours > 24;
-            }
+            // 验证缓存完整性（包括哈希校验和过期检查）
+            const isCacheValid = this._validatePreviewCache(filename, cacheFilePath);
 
-            if (needsDownload) {
-                // 缓存不存在或已过期，下载并保存
+            if (!isCacheValid) {
+                // 缓存无效/损坏/过期，重新下载
                 const readmeContent = await this._fetchSkillReadme(skill);
-                fs.writeFileSync(cacheFilePath, readmeContent, 'utf-8');
+                this._savePreviewCache(filename, cacheFilePath, readmeContent);
             }
 
             // 将缓存文件设置为只读
@@ -786,5 +798,113 @@ export class SkillMarketplaceViewProvider implements vscode.WebviewViewProvider 
      */
     private async _handleRevealInExplorer(skillId: string | number) {
         await this._installer.revealSkillInExplorer(String(skillId));
+    }
+
+    /**
+     * 获取预览缓存目录路径
+     */
+    private _getPreviewCacheDir(): string {
+        return path.join(os.homedir(), '.skill-marketplace', 'cache', 'previews');
+    }
+
+    /**
+     * 获取预览缓存元数据文件路径
+     */
+    private _getPreviewCacheMetaPath(): string {
+        return path.join(this._getPreviewCacheDir(), '.cache_meta.json');
+    }
+
+    /**
+     * 计算内容哈希
+     */
+    private _computeHash(content: string): string {
+        return crypto.createHash('md5').update(content).digest('hex');
+    }
+
+    /**
+     * 加载预览缓存元数据
+     */
+    private _loadPreviewCacheMeta(): PreviewCacheMeta {
+        try {
+            const metaPath = this._getPreviewCacheMetaPath();
+            if (fs.existsSync(metaPath)) {
+                return JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+            }
+        } catch (e) {
+            console.warn('加载预览缓存元数据失败:', e);
+        }
+        return {};
+    }
+
+    /**
+     * 保存预览缓存元数据
+     */
+    private _savePreviewCacheMeta(meta: PreviewCacheMeta): void {
+        try {
+            const metaPath = this._getPreviewCacheMetaPath();
+            fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf8');
+        } catch (e) {
+            console.warn('保存预览缓存元数据失败:', e);
+        }
+    }
+
+    /**
+     * 验证预览缓存文件完整性
+     * @returns true 如果缓存有效，false 如果需要重新下载
+     */
+    private _validatePreviewCache(filename: string, filePath: string): boolean {
+        try {
+            if (!fs.existsSync(filePath)) {
+                return false;
+            }
+
+            const meta = this._loadPreviewCacheMeta();
+            const fileMeta = meta[filename];
+
+            if (!fileMeta) {
+                // 没有元数据，需要重新下载
+                return false;
+            }
+
+            // 检查是否过期（24小时）
+            const ageInHours = (Date.now() - fileMeta.downloadedAt) / (1000 * 60 * 60);
+            if (ageInHours > 24) {
+                return false;
+            }
+
+            // 验证内容哈希
+            const content = fs.readFileSync(filePath, 'utf8');
+            const actualHash = this._computeHash(content);
+
+            if (actualHash !== fileMeta.hash) {
+                console.warn(`预览缓存文件已损坏: ${filename}，将重新下载`);
+                return false;
+            }
+
+            return true;
+        } catch (e) {
+            console.warn('验证预览缓存失败:', e);
+            return false;
+        }
+    }
+
+    /**
+     * 保存预览缓存文件（带哈希校验）
+     */
+    private _savePreviewCache(filename: string, filePath: string, content: string): void {
+        try {
+            // 保存文件内容
+            fs.writeFileSync(filePath, content, 'utf-8');
+
+            // 更新元数据
+            const meta = this._loadPreviewCacheMeta();
+            meta[filename] = {
+                hash: this._computeHash(content),
+                downloadedAt: Date.now()
+            };
+            this._savePreviewCacheMeta(meta);
+        } catch (e) {
+            console.warn('保存预览缓存失败:', e);
+        }
     }
 }

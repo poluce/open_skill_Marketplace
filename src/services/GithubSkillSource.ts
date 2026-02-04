@@ -3,12 +3,40 @@ import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { ClaudeSkill } from '../models/ClaudeSkill';
 import { Skill } from '../models/Skill';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 const RAW_GITHUB_BASE = 'https://raw.githubusercontent.com';
+
+/**
+ * 缓存结构接口
+ */
+interface SkillCache {
+    last_update: number;
+    etag?: string;           // GitHub API 返回的 ETag
+    contentHash?: string;    // 缓存内容的 MD5 哈希值
+    skills: Skill[];
+}
+
+/**
+ * 缓存加载结果
+ */
+interface CacheLoadResult {
+    skills: Skill[];
+    etag?: string;
+    isValid: boolean;
+}
+
+/**
+ * 计算缓存内容哈希
+ */
+function computeContentHash(skills: Skill[]): string {
+    const content = JSON.stringify(skills);
+    return crypto.createHash('md5').update(content).digest('hex');
+}
 
 /**
  * GitHub API 目录内容响应类型
@@ -393,11 +421,27 @@ export class GithubSkillSource {
 
     /**
      * 获取合并后的高赞技能列表
-     * @returns { skills: Skill[], isRateLimited: boolean }
+     * @returns { skills: Skill[], isRateLimited: boolean, fromCache: boolean }
      */
-    async fetchSkillList(): Promise<{ skills: Skill[], isRateLimited: boolean }> {
+    async fetchSkillList(): Promise<{ skills: Skill[], isRateLimited: boolean, fromCache: boolean }> {
         let isRateLimited = false;
 
+        // 步骤 1：加载缓存并检查完整性
+        const cache = this.loadFromCache();
+
+        // 步骤 2：如果缓存有效且有 ETag，使用条件请求检查源是否更新
+        if (cache.isValid && cache.skills.length > 0 && cache.etag) {
+            const checkResult = await this.checkCacheValidity(cache.etag);
+
+            if (checkResult.notModified) {
+                console.log(`使用本地缓存（304 Not Modified），共 ${cache.skills.length} 个技能`);
+                return { skills: cache.skills, isRateLimited: false, fromCache: true };
+            }
+            // 源有更新，继续重新获取
+            console.log('检测到源有更新，将重新获取技能列表');
+        }
+
+        // 步骤 3：缓存无效/损坏/过期/源有更新，重新获取
         try {
             console.log('正在从 GitHub 实时获取技能列表...');
             const results = await Promise.all(this.sources.map(async (source) => {
@@ -405,43 +449,47 @@ export class GithubSkillSource {
                     return await source.fetchSkills();
                 } catch (error) {
                     console.warn(`技能源抓取失败:`, error);
-                    isRateLimited = true; // 任何源失败都标记为受限
+                    isRateLimited = true;
                     return [];
                 }
             }));
             const allSkills = results.flat();
 
             if (allSkills.length > 0) {
-                this.saveToCache(allSkills);
-                return { skills: allSkills, isRateLimited };
+                // 获取新的 ETag 用于下次缓存验证
+                const newEtag = await this.fetchRepoEtag();
+                this.saveToCache(allSkills, newEtag);
+                return { skills: allSkills, isRateLimited, fromCache: false };
             }
         } catch (error) {
             console.warn('GitHub 实时抓取失败，尝试加载本地缓存:', error);
             isRateLimited = true;
         }
 
-        const cached = this.loadFromCache();
-        if (cached.length > 0) {
-            console.log(`成功从本地缓存加载 ${cached.length} 个技能`);
-            return { skills: cached, isRateLimited: true }; // 使用缓存也标记为受限
+        // 步骤 4：API 失败时回退到缓存（即使过期）
+        if (cache.skills.length > 0) {
+            console.log(`API 失败，回退到本地缓存，共 ${cache.skills.length} 个技能`);
+            return { skills: cache.skills, isRateLimited: true, fromCache: true };
         }
 
         console.warn('所有请求和缓存均失效');
-        return { skills: [], isRateLimited: true };
+        return { skills: [], isRateLimited: true, fromCache: false };
     }
 
     private getCachePath(): string {
-        const cacheDir = path.join(os.homedir(), '.gemini');
+        const cacheDir = path.join(os.homedir(), '.skill-marketplace', 'cache');
         if (!fs.existsSync(cacheDir)) {
             fs.mkdirSync(cacheDir, { recursive: true });
         }
         return path.join(cacheDir, 'marketplace_cache.json');
     }
 
-    private saveToCache(skills: Skill[]) {
+    private saveToCache(skills: Skill[], etag?: string) {
         try {
-            const data = {
+            const data: SkillCache = {
                 last_update: Date.now(),
+                etag: etag,
+                contentHash: computeContentHash(skills),
                 skills: skills
             };
             fs.writeFileSync(this.getCachePath(), JSON.stringify(data, null, 2), 'utf8');
@@ -450,20 +498,132 @@ export class GithubSkillSource {
         }
     }
 
-    private loadFromCache(): Skill[] {
+    private loadFromCache(): CacheLoadResult {
         try {
             const cachePath = this.getCachePath();
-            if (fs.existsSync(cachePath)) {
-                const data = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
-                // 缓存有效期 24 小时
-                const isExpired = Date.now() - data.last_update > 24 * 60 * 60 * 1000;
-                if (!isExpired) {
-                    return data.skills || [];
+            if (!fs.existsSync(cachePath)) {
+                return { skills: [], isValid: false };
+            }
+
+            const data: SkillCache = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+
+            // 校验缓存完整性
+            if (data.contentHash && data.skills) {
+                const actualHash = computeContentHash(data.skills);
+                if (actualHash !== data.contentHash) {
+                    console.warn('缓存内容已损坏，将重新获取');
+                    return { skills: [], isValid: false };
                 }
             }
+
+            // 缓存有效期 24 小时
+            const isExpired = Date.now() - data.last_update > 24 * 60 * 60 * 1000;
+            if (isExpired) {
+                return { skills: data.skills || [], etag: data.etag, isValid: false };
+            }
+
+            return { skills: data.skills || [], etag: data.etag, isValid: true };
         } catch (e) {
             console.error('加载缓存失败:', e);
+            return { skills: [], isValid: false };
         }
-        return [];
+    }
+
+    /**
+     * 使用 ETag 条件请求检查缓存是否仍然有效
+     * 304 响应不消耗 API 配额
+     */
+    private async checkCacheValidity(etag: string): Promise<{ notModified: boolean; newEtag?: string }> {
+        return new Promise((resolve) => {
+            // 使用第一个源的仓库作为检查目标
+            if (this.sourceConfigs.length === 0) {
+                resolve({ notModified: false });
+                return;
+            }
+
+            const firstSource = this.sourceConfigs[0];
+            const apiPath = `/repos/${firstSource.owner}/${firstSource.repo}/commits?sha=${firstSource.branch}&per_page=1`;
+            const url = `${GITHUB_API_BASE}${apiPath}`;
+
+            const vsConfig = vscode.workspace.getConfiguration('antigravity');
+            const token = vsConfig.get<string>('githubToken', '');
+
+            const headers: HttpHeaders = {
+                'User-Agent': 'VSCode-Antigravity-SkillMarketplace',
+                'Accept': 'application/vnd.github.v3+json',
+                'If-None-Match': etag
+            };
+
+            if (token) {
+                headers['Authorization'] = `token ${token}`;
+            }
+
+            const options = { headers };
+
+            https.get(url, options, (res: http.IncomingMessage) => {
+                // 消费响应体以正确关闭连接
+                res.on('data', () => {});
+                res.on('end', () => {
+                    if (res.statusCode === 304) {
+                        console.log('ETag 匹配，缓存仍然有效 (304 Not Modified)');
+                        resolve({ notModified: true });
+                    } else if (res.statusCode === 200) {
+                        const newEtag = res.headers['etag'] as string | undefined;
+                        console.log('源有更新，需要刷新缓存');
+                        resolve({ notModified: false, newEtag });
+                    } else {
+                        console.warn(`ETag 检查失败 [${res.statusCode}]，将重新获取`);
+                        resolve({ notModified: false });
+                    }
+                });
+            }).on('error', (err) => {
+                console.warn('ETag 检查网络错误:', err);
+                resolve({ notModified: false });
+            });
+        });
+    }
+
+    /**
+     * 获取仓库最新 commit 的 ETag（用于首次缓存）
+     */
+    private async fetchRepoEtag(): Promise<string | undefined> {
+        return new Promise((resolve) => {
+            if (this.sourceConfigs.length === 0) {
+                resolve(undefined);
+                return;
+            }
+
+            const firstSource = this.sourceConfigs[0];
+            const apiPath = `/repos/${firstSource.owner}/${firstSource.repo}/commits?sha=${firstSource.branch}&per_page=1`;
+            const url = `${GITHUB_API_BASE}${apiPath}`;
+
+            const vsConfig = vscode.workspace.getConfiguration('antigravity');
+            const token = vsConfig.get<string>('githubToken', '');
+
+            const headers: HttpHeaders = {
+                'User-Agent': 'VSCode-Antigravity-SkillMarketplace',
+                'Accept': 'application/vnd.github.v3+json'
+            };
+
+            if (token) {
+                headers['Authorization'] = `token ${token}`;
+            }
+
+            const options = { headers };
+
+            https.get(url, options, (res: http.IncomingMessage) => {
+                res.on('data', () => {});
+                res.on('end', () => {
+                    if (res.statusCode === 200) {
+                        const etag = res.headers['etag'] as string | undefined;
+                        resolve(etag);
+                    } else {
+                        resolve(undefined);
+                    }
+                });
+            }).on('error', () => {
+                resolve(undefined);
+            });
+        });
     }
 }
