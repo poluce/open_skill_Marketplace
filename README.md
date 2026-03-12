@@ -42,6 +42,7 @@
 | Scientific  | [K-Dense-AI/claude-scientific-skills](https://github.com/K-Dense-AI/claude-scientific-skills) | main   | 专注于科学计算与分析的技能 |
 | Bear2u      | [bear2u/my-skills](https://github.com/bear2u/my-skills)                               | master | 个人开发的实用工具技能集   |
 | n8n         | [czlonkowski/n8n-skills](https://github.com/czlonkowski/n8n-skills)                   | main   | n8n 自动化工作流集成技能   |
+| Output      | [poluce/output_skills](https://github.com/poluce/output_skills)                       | main   | 各种输出类与增强型技能集合 |
 
 ## 插件设置
 

@@ -1,5 +1,5 @@
 import { IAgent } from '../models/Agent';
-import { AntigravityAgent, ClaudeAgent, CodexAgent, OpenCodeAgent } from './agents/DefaultAgents';
+import { AntigravityAgent, GeminiAgent, ClaudeAgent, CodexAgent, OpenCodeAgent } from './agents/DefaultAgents';
 
 /**
  * Agent 管理器
@@ -13,6 +13,7 @@ export class AgentManager {
         // 注册默认支持的 Agent
         [
             new AntigravityAgent(),
+            new GeminiAgent(),
             new ClaudeAgent(),
             new CodexAgent(),
             new OpenCodeAgent()

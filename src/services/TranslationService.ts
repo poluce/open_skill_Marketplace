@@ -36,11 +36,11 @@ export class TranslationService {
      * 获取缓存文件路径
      */
     private getCachePath(): string {
-        const cacheDir = path.join(os.homedir(), '.gemini');
+        const cacheDir = path.join(os.homedir(), '.skill-marketplace', 'cache');
         if (!fs.existsSync(cacheDir)) {
             fs.mkdirSync(cacheDir, { recursive: true });
         }
-        return path.join(cacheDir, CACHE_FILE);
+        return path.join(cacheDir, 'translations_cache.json');
     }
 
     /**

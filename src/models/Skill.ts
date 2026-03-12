@@ -22,4 +22,14 @@ export interface Skill {
     translatedDesc?: string;
     /** AI 识别的分类 (显示决策权交由前端) */
     aiCategory?: string;
+    /** 最新 commit SHA (短格式，7位) */
+    commitSha?: string;
+    /** 最后更新时间戳 */
+    lastUpdated?: number;
+    /** 是否有可用更新 */
+    hasUpdate?: boolean;
+    /** 已安装的版本 SHA */
+    installedVersion?: string;
+    /** 是否被用户修改（从元数据读取） */
+    isLocalModified?: boolean;
 }

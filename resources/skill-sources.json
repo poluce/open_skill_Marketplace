@@ -158,6 +158,21 @@
         "#DB2777"
       ],
       "iconUrl": "https://github.com/czlonkowski.png?s=40"
+    },
+    {
+      "id": "output_skills",
+      "displayName": "Output Skills",
+      "owner": "poluce",
+      "repo": "output_skills",
+      "branch": "main",
+      "skillsPath": "glm-skills",
+      "pathType": "subdir",
+      "icon": "🚀",
+      "colors": [
+        "#00D2FF",
+        "#3A7BD5"
+      ],
+      "iconUrl": "https://github.com/poluce.png?s=40"
     }
   ]
 }
