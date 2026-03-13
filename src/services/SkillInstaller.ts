@@ -14,6 +14,41 @@ const GITHUB_API_BASE = 'https://api.github.com';
 
 import { AgentManager } from './AgentManager';
 
+export interface SkillFileEntry {
+    name: string;
+    path: string;
+    relativePath: string;
+}
+
+interface GithubSkillFileItem {
+    name: string;
+    path: string;
+    type: string;
+}
+
+export function collectFileEntries(skillPath: string, items: GithubSkillFileItem[]): SkillFileEntry[] {
+    const normalizedSkillPath = skillPath.replace(/\\/g, '/').replace(/\/+$/, '');
+
+    return items
+        .filter(item => item.type === 'file')
+        .map(item => {
+            const normalizedItemPath = item.path.replace(/\\/g, '/');
+            const relativePath = normalizedItemPath.startsWith(`${normalizedSkillPath}/`)
+                ? normalizedItemPath.slice(normalizedSkillPath.length + 1)
+                : item.name;
+
+            return {
+                name: item.name,
+                path: item.path,
+                relativePath
+            };
+        });
+}
+
+export function buildInstallTargetPath(baseDir: string, relativePath: string): string {
+    return path.join(baseDir, relativePath);
+}
+
 /**
  * 技能安装服务
  * 负责将技能从 GitHub 下载并安装到本地目录
@@ -356,7 +391,9 @@ export class SkillInstaller {
             const total = files.length;
 
             for (const file of files) {
-                await this.downloadFile(skill, file.path, path.join(actualDir, file.name));
+                const targetPath = buildInstallTargetPath(actualDir, file.relativePath);
+                fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+                await this.downloadFile(skill, file.path, targetPath);
                 completed++;
                 if (onProgress) {
                     onProgress(completed, total);
@@ -409,7 +446,7 @@ export class SkillInstaller {
      * 获取技能目录下的所有文件
      * @param skill 包含仓库信息的 Skill 对象
      */
-    private async fetchSkillFiles(skill: Skill): Promise<Array<{ name: string; path: string }>> {
+    private async fetchSkillFiles(skill: Skill): Promise<SkillFileEntry[]> {
         return new Promise((resolve, reject) => {
             const url = `${GITHUB_API_BASE}/repos/${skill.repoOwner}/${skill.repoName}/contents/${skill.skillPath}`;
             const config = vscode.workspace.getConfiguration('antigravity');
@@ -434,14 +471,8 @@ export class SkillInstaller {
                 res.on('end', () => {
                     if (res.statusCode === 200) {
                         try {
-                            const items = JSON.parse(data);
-                            const files = items
-                                .filter((item: { type: string }) => item.type === 'file')
-                                .map((item: { name: string; path: string }) => ({
-                                    name: item.name,
-                                    path: item.path
-                                }));
-                            resolve(files);
+                            const items: GithubSkillFileItem[] = JSON.parse(data);
+                            resolve(collectFileEntries(skill.skillPath || '', items));
                         } catch (e) {
                             reject(new Error('解析文件列表失败'));
                         }

@@ -16,7 +16,8 @@ const RAW_GITHUB_BASE = 'https://raw.githubusercontent.com';
  */
 interface SkillCache {
     last_update: number;
-    etag?: string;           // GitHub API 返回的 ETag
+    etag?: string;           // 兼容旧缓存
+    sourceSignatures?: string[];
     contentHash?: string;    // 缓存内容的 MD5 哈希值
     skills: Skill[];
 }
@@ -27,6 +28,7 @@ interface SkillCache {
 interface CacheLoadResult {
     skills: Skill[];
     etag?: string;
+    sourceSignatures?: string[];
     isValid: boolean;
 }
 
@@ -51,6 +53,18 @@ interface GithubContentItem {
  * HTTP 请求头类型
  */
 type HttpHeaders = Record<string, string>;
+
+export function areSourceSignaturesEqual(cached: string[], current: string[]): boolean {
+    if (cached.length !== current.length) {
+        return false;
+    }
+
+    return cached.every((signature, index) => signature === current[index]);
+}
+
+function buildSourceSignature(config: SkillSourceConfig): string {
+    return `${config.id}:${config.owner}/${config.repo}@${config.branch}`;
+}
 
 /**
  * 技能源配置接口
@@ -419,6 +433,10 @@ export class GithubSkillSource {
         return this.sourceConfigs;
     }
 
+    private getCurrentSourceSignatures(): string[] {
+        return this.sourceConfigs.map(buildSourceSignature);
+    }
+
     /**
      * 获取合并后的高赞技能列表
      * @returns { skills: Skill[], isRateLimited: boolean, fromCache: boolean }
@@ -429,16 +447,23 @@ export class GithubSkillSource {
         // 步骤 1：加载缓存并检查完整性
         const cache = this.loadFromCache();
 
-        // 步骤 2：如果缓存有效且有 ETag，使用条件请求检查源是否更新
-        if (cache.isValid && cache.skills.length > 0 && cache.etag) {
-            const checkResult = await this.checkCacheValidity(cache.etag);
-
-            if (checkResult.notModified) {
-                console.log(`使用本地缓存（304 Not Modified），共 ${cache.skills.length} 个技能`);
+        if (cache.isValid && cache.skills.length > 0) {
+            const currentSourceSignatures = this.getCurrentSourceSignatures();
+            if (cache.sourceSignatures && areSourceSignaturesEqual(cache.sourceSignatures, currentSourceSignatures)) {
+                console.log(`使用本地缓存（源配置未变化），共 ${cache.skills.length} 个技能`);
                 return { skills: cache.skills, isRateLimited: false, fromCache: true };
             }
-            // 源有更新，继续重新获取
-            console.log('检测到源有更新，将重新获取技能列表');
+
+            if (cache.etag) {
+                const checkResult = await this.checkCacheValidity(cache.etag);
+
+                if (checkResult.notModified) {
+                    console.log(`使用本地缓存（304 Not Modified），共 ${cache.skills.length} 个技能`);
+                    return { skills: cache.skills, isRateLimited: false, fromCache: true };
+                }
+                // 源有更新，继续重新获取
+                console.log('检测到源有更新，将重新获取技能列表');
+            }
         }
 
         // 步骤 3：缓存无效/损坏/过期/源有更新，重新获取
@@ -458,7 +483,7 @@ export class GithubSkillSource {
             if (allSkills.length > 0) {
                 // 获取新的 ETag 用于下次缓存验证
                 const newEtag = await this.fetchRepoEtag();
-                this.saveToCache(allSkills, newEtag);
+                this.saveToCache(allSkills, newEtag, this.getCurrentSourceSignatures());
                 return { skills: allSkills, isRateLimited, fromCache: false };
             }
         } catch (error) {
@@ -484,11 +509,12 @@ export class GithubSkillSource {
         return path.join(cacheDir, 'marketplace_cache.json');
     }
 
-    private saveToCache(skills: Skill[], etag?: string) {
+    private saveToCache(skills: Skill[], etag?: string, sourceSignatures?: string[]) {
         try {
             const data: SkillCache = {
                 last_update: Date.now(),
                 etag: etag,
+                sourceSignatures,
                 contentHash: computeContentHash(skills),
                 skills: skills
             };
@@ -519,10 +545,10 @@ export class GithubSkillSource {
             // 缓存有效期 24 小时
             const isExpired = Date.now() - data.last_update > 24 * 60 * 60 * 1000;
             if (isExpired) {
-                return { skills: data.skills || [], etag: data.etag, isValid: false };
+                return { skills: data.skills || [], etag: data.etag, sourceSignatures: data.sourceSignatures, isValid: false };
             }
 
-            return { skills: data.skills || [], etag: data.etag, isValid: true };
+            return { skills: data.skills || [], etag: data.etag, sourceSignatures: data.sourceSignatures, isValid: true };
         } catch (e) {
             console.error('加载缓存失败:', e);
             return { skills: [], isValid: false };

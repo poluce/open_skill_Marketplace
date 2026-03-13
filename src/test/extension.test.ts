@@ -1,15 +1,35 @@
 import * as assert from 'assert';
-
-// You can import and use all API from the 'vscode' module
-// as well as import your extension to test it
-import * as vscode from 'vscode';
-// import * as myExtension from '../../extension';
+import { buildInstallTargetPath, collectFileEntries } from '../services/SkillInstaller';
+import { areSourceSignaturesEqual } from '../services/GithubSkillSource';
 
 suite('Extension Test Suite', () => {
-	vscode.window.showInformationMessage('Start all tests.');
+	test('collectFileEntries 保留嵌套目录相对路径', () => {
+		const files = collectFileEntries('skills/example', [
+			{ type: 'file', path: 'skills/example/SKILL.md', name: 'SKILL.md' },
+			{ type: 'file', path: 'skills/example/scripts/helper.js', name: 'helper.js' },
+			{ type: 'dir', path: 'skills/example/scripts', name: 'scripts' }
+		]);
 
-	test('Sample test', () => {
-		assert.strictEqual(-1, [1, 2, 3].indexOf(5));
-		assert.strictEqual(-1, [1, 2, 3].indexOf(0));
+		assert.deepStrictEqual(files, [
+			{ name: 'SKILL.md', path: 'skills/example/SKILL.md', relativePath: 'SKILL.md' },
+			{ name: 'helper.js', path: 'skills/example/scripts/helper.js', relativePath: 'scripts/helper.js' }
+		]);
+	});
+
+	test('buildInstallTargetPath 保留子目录结构', () => {
+		assert.strictEqual(
+			buildInstallTargetPath('C:/target', 'scripts/helper.js').replace(/\\/g, '/'),
+			'C:/target/scripts/helper.js'
+		);
+	});
+
+	test('areSourceSignaturesEqual 在任一源变化时返回 false', () => {
+		assert.strictEqual(
+			areSourceSignaturesEqual(
+				['anthropic:abc', 'openai:def'],
+				['anthropic:abc', 'openai:xyz']
+			),
+			false
+		);
 	});
 });
