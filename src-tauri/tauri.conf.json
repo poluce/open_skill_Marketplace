@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "技能市场",
+  "version": "0.1.0",
+  "identifier": "com.poluce.skill-marketplace",
+  "build": {
+    "beforeDevCommand": "npm run web:dev",
+    "beforeBuildCommand": "npm run web:build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "dist-web"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "技能市场",
+        "width": 1200,
+        "height": 800,
+        "resizable": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all"
+  }
+}

@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import { buildInstallTargetPath, collectFileEntries } from '../services/SkillInstaller';
 import { areSourceSignaturesEqual } from '../services/GithubSkillSource';
+import { getAppShellTitle, normalizeHealthMessage, getHealthPlaceholder } from '../app/bootstrap';
 
 suite('Extension Test Suite', () => {
 	test('collectFileEntries 保留嵌套目录相对路径', () => {
@@ -31,5 +32,17 @@ suite('Extension Test Suite', () => {
 			),
 			false
 		);
+	});
+
+	test('getAppShellTitle 返回桌面应用标题', () => {
+		assert.strictEqual(getAppShellTitle(), '技能市场');
+	});
+
+	test('normalizeHealthMessage 规范化 rust 健康检查文案', () => {
+		assert.strictEqual(normalizeHealthMessage('  tauri ready  '), 'tauri ready');
+	});
+
+	test('getHealthPlaceholder 返回 React 壳加载提示', () => {
+		assert.strictEqual(getHealthPlaceholder(), '正在连接 Rust 后端…');
 	});
 });
