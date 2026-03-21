@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::io::Read;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -438,6 +438,17 @@ fn merge_warnings(existing: Option<String>, next: Option<String>) -> Option<Stri
         (None, Some(right)) => Some(right),
         (None, None) => None,
     }
+}
+
+fn emit_console_line(message: &str) {
+    let mut stdout = io::stdout().lock();
+    let _ = stdout.write_all(message.as_bytes());
+    let _ = stdout.write_all(b"\n");
+    let _ = stdout.flush();
+}
+
+fn emit_source_notice(source_id: &str, message: &str) {
+    emit_console_line(&format!("[source:{source_id}] {message}"));
 }
 
 fn is_mostly_chinese(text: &str) -> bool {
@@ -1090,7 +1101,7 @@ async fn fetch_remote_skills(
                 source_errors.push(error);
                 let source_status = build_source_status(source, 0, 0, source_errors);
                 if let Some(error) = &source_status.error {
-                    eprintln!("[source:{}] {}", source.id, error);
+                    emit_source_notice(&source.id, error);
                 }
                 warning_messages.push(format!("{} 加载失败", source.display_name));
                 source_statuses.push(source_status);
@@ -1183,9 +1194,12 @@ async fn fetch_remote_skills(
 
             let skill_id = format!("{}:{}", source.id, skill_dir_name);
             if !seen_source_skill_ids.insert(skill_id.clone()) {
-                eprintln!(
-                    "[source:{}] duplicated logical skill id {}, dropping path {}",
-                    source.id, skill_id, skill_base_path
+                emit_source_notice(
+                    &source.id,
+                    &format!(
+                        "duplicated logical skill id {}, dropping path {}",
+                        skill_id, skill_base_path
+                    ),
                 );
                 continue;
             }
@@ -1231,7 +1245,7 @@ async fn fetch_remote_skills(
         );
         if source_status.status == "error" {
             if let Some(error) = &source_status.error {
-                eprintln!("[source:{}] {}", source.id, error);
+                emit_source_notice(&source.id, error);
             }
             warning_messages.push(format!("{} 加载失败", source.display_name));
         }

@@ -4,9 +4,69 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+
+function Initialize-Utf8Console {
+    [Console]::InputEncoding = $script:Utf8NoBom
+    [Console]::OutputEncoding = $script:Utf8NoBom
+    $global:OutputEncoding = $script:Utf8NoBom
+    $PSDefaultParameterValues["Out-File:Encoding"] = "utf8"
+    $PSDefaultParameterValues["Set-Content:Encoding"] = "utf8"
+    $PSDefaultParameterValues["Add-Content:Encoding"] = "utf8"
+    $env:CARGO_TERM_PROGRESS_WHEN = "never"
+    $env:CARGO_TERM_COLOR = "never"
+    $env:NO_COLOR = "1"
+    $env:FORCE_COLOR = "0"
+    $env:VITE_CJS_IGNORE_WARNING = "true"
+    $null = & cmd.exe /d /c chcp 65001 > $null
+}
+
+function Write-Status {
+    param(
+        [AllowEmptyString()]
+        [string]$Message = ""
+    )
+
+    [Console]::Out.WriteLine($Message)
+}
+
+function Remove-AnsiEscapes {
+    param(
+        [AllowNull()]
+        [object]$Value
+    )
+
+    if ($null -eq $Value) {
+        return ""
+    }
+
+    $text = $Value.ToString()
+    $csiPattern = [string][char]27 + '\[[0-?]*[ -/]*[@-~]'
+    $oscPattern = [string][char]27 + '\][^\a]*(?:\a|' + [string][char]27 + '\\)'
+    $withoutOsc = [regex]::Replace($text, $oscPattern, "")
+    return [regex]::Replace($withoutOsc, $csiPattern, "")
+}
+
+function Invoke-StreamingCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CommandLine,
+        [Parameter(Mandatory = $true)]
+        [string]$FailureMessage
+    )
+
+    & cmd.exe /d /c "$CommandLine 2>&1" | ForEach-Object {
+        Write-Status (Remove-AnsiEscapes $_)
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        throw $FailureMessage
+    }
+}
 
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $repoRoot
+Initialize-Utf8Console
 
 function Assert-Command {
     param(
@@ -54,7 +114,7 @@ function Import-MsvcEnvironment {
     }
 
     $vsDevCmd = Get-VsDevCmdPath
-    Write-Host "载入 VS 开发环境: $vsDevCmd"
+    Write-Status "载入 VS 开发环境: $vsDevCmd"
 
     $envOutput = & cmd.exe /d /c "`"$vsDevCmd`" -arch=x64 -host_arch=x64 >nul && set"
     if ($LASTEXITCODE -ne 0) {
@@ -73,7 +133,7 @@ function Import-MsvcEnvironment {
     }
 
     $firstLinkPath = @($linkPaths)[0]
-    Write-Host "已启用 MSVC: $firstLinkPath"
+    Write-Status "已启用 MSVC: $firstLinkPath"
 }
 
 function Clear-StaleDevServer {
@@ -90,7 +150,7 @@ function Clear-StaleDevServer {
         }
 
         if ($process.ProcessName -in @("esbuild", "node")) {
-            Write-Host "检测到残留开发服务器，占用 1420 端口，正在停止: $($process.ProcessName) ($processId)"
+            Write-Status "检测到残留开发服务器，占用 1420 端口，正在停止: $($process.ProcessName) ($processId)"
             Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
         }
         else {
@@ -107,24 +167,18 @@ Assert-Command -Name "cargo"
 
 $nodeModulesDir = Join-Path $repoRoot "node_modules"
 if (-not $SkipInstall -and -not (Test-Path -LiteralPath $nodeModulesDir -PathType Container)) {
-    Write-Host "未检测到 node_modules，正在执行 npm install..."
-    & npm.cmd install
-    if ($LASTEXITCODE -ne 0) {
-        throw "npm install 失败。"
-    }
+    Write-Status "未检测到 node_modules，正在执行 npm install..."
+    Invoke-StreamingCommand -CommandLine "npm.cmd install" -FailureMessage "npm install 失败。"
 }
 
 Import-MsvcEnvironment
 Clear-StaleDevServer
 
-Write-Host ""
-Write-Host "启动桌面热更新开发环境..."
-Write-Host "请保持这个终端窗口开启。"
-Write-Host "修改 src/ 或 src-tauri/ 下的文件后，桌面应用会自动重新编译。"
-Write-Host "按 Ctrl+C 可以停止开发环境。"
-Write-Host ""
+Write-Status ""
+Write-Status "启动桌面热更新开发环境..."
+Write-Status "请保持这个终端窗口开启。"
+Write-Status "修改 src/ 或 src-tauri/ 下的文件后，桌面应用会自动重新编译。"
+Write-Status "按 Ctrl+C 可以停止开发环境。"
+Write-Status ""
 
-& npm.cmd run tauri:dev
-if ($LASTEXITCODE -ne 0) {
-    throw "npm run tauri:dev 失败。"
-}
+Invoke-StreamingCommand -CommandLine "npm.cmd run tauri:dev" -FailureMessage "npm run tauri:dev 失败。"
