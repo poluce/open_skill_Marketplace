@@ -1,148 +1,39 @@
 {
-  "name": "skill-marketplace",
-  "displayName": "技能市场",
-  "description": "通用 Agent 技能的发现、安装与管理工具。",
+  "name": "skill-marketplace-desktop",
+  "private": true,
   "version": "0.2.0",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/poluce/open_skill_Marketplace.git"
-  },
-  "publisher": "poluce",
-  "engines": {
-    "vscode": "^1.90.0"
-  },
-  "categories": [
-    "Other"
-  ],
-  "activationEvents": [],
-  "main": "./dist/extension.js",
-  "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "antigravity-marketplace",
-          "title": "技能市场",
-          "icon": "resources/marketplace.svg"
-        }
-      ]
-    },
-    "views": {
-      "antigravity-marketplace": [
-        {
-          "type": "webview",
-          "id": "skill-marketplace.views.sidebar",
-          "name": "技能市场",
-          "icon": "resources/marketplace.svg"
-        }
-      ]
-    },
-    "commands": [
-      {
-        "command": "skill-marketplace.openMarketplace",
-        "title": "打开技能市场"
-      }
-    ],
-    "configuration": {
-      "title": "技能市场",
-      "properties": {
-        "antigravity.agentType": {
-          "type": "string",
-          "enum": [
-            "antigravity",
-            "gemini",
-            "claude",
-            "codex",
-            "opencode"
-          ],
-          "enumDescriptions": [
-            "Antigravity (Gemini)",
-            "Gemini CLI",
-            "Claude Code CLI",
-            "Codex CLI",
-            "Open Code"
-          ],
-          "default": "gemini",
-          "description": "目标 Agent 类型"
-        },
-        "antigravity.installScope": {
-          "type": "string",
-          "enum": [
-            "global",
-            "project"
-          ],
-          "enumDescriptions": [
-            "安装到 Agent 的全局技能目录",
-            "安装到当前工作区的 Agent 技能目录"
-          ],
-          "default": "global",
-          "description": "技能安装范围"
-        },
-        "antigravity.skillsPath": {
-          "type": "string",
-          "default": "",
-          "description": "自定义技能目录路径（覆盖默认路径）"
-        },
-        "antigravity.accentColor": {
-          "type": "string",
-          "default": "#8A2BE2",
-          "description": "技能市场界面的强调色（支持 CSS 颜色值，如 #8A2BE2, rgba(0,0,0,1) 等）。"
-        },
-        "antigravity.githubToken": {
-          "type": "string",
-          "default": "",
-          "description": "GitHub 个人访问令牌 (PAT)。配置后可将请求频率限制从 60次/小时 提升至 5000次/小时。"
-        },
-        "antigravity.deepseekApiKey": {
-          "type": "string",
-          "default": "",
-          "description": "DeepSeek API Key，用于自动翻译技能描述为中文。"
-        },
-        "antigravity.language": {
-          "type": "string",
-          "enum": [
-            "",
-            "zh-CN"
-          ],
-          "default": "",
-          "description": "技能市场显示语言（为空则显示原文，zh-CN 则自动翻译为中文）。"
-        },
-        "antigravity.showAiCategories": {
-          "type": "boolean",
-          "default": true,
-          "description": "是否在界面中显示 AI 自动识别的分类（编程、办公等）。"
-        }
-      }
-    }
-  },
+  "description": "通用 Agent 技能的发现、安装与管理桌面应用。",
+  "type": "module",
   "scripts": {
-    "compile": "npm run check-types && npm run lint && npm run web:build",
-    "web:dev": "node esbuild.js --watch",
-    "web:build": "node esbuild.js",
-    "watch": "npm run web:dev",
-    "package": "npm run compile",
+    "dev": "vite",
+    "web:dev": "vite",
+    "build": "tsc && vite build",
+    "web:build": "tsc && vite build",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
-    "test": "npm run check-types",
-    "tauri:dev": "cargo tauri dev --config src-tauri/tauri.conf.json",
-    "tauri:build": "cargo tauri build --config src-tauri/tauri.conf.json"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.10.1",
-    "@types/mocha": "^10.0.10",
-    "@types/node": "22.x",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "@types/vscode": "^1.90.0",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2",
-    "esbuild": "^0.27.2",
-    "eslint": "^9.39.2",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.52.0"
+    "compile": "npm run check-types && npm run lint && npm run web:build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "npm exec tauri dev -- --config src-tauri/tauri.conf.json",
+    "tauri:build": "npm exec tauri build -- --config src-tauri/tauri.conf.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-opener": "^2.5.3",
+    "@tauri-apps/plugin-store": "^2.4.2",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.6.0",
+    "eslint": "^9.39.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.52.0",
+    "vite": "^7.0.4"
   }
 }

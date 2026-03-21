@@ -1,7 +1,26 @@
-out
-dist
+# Logs
+logs
+*.log
+tmp-tauri-dev*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
 node_modules
-.vscode-test/
-*.vsix
-dist-web
+dist
+dist-ssr
+*.local
 src-tauri/target
+src-tauri/gen/schemas
+
+# Editor directories and files
+.vscode/
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
