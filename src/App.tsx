@@ -263,22 +263,6 @@ export function App() {
   }, [sidebarCollapsed, sidebarPreferenceHydrated]);
 
   useEffect(() => {
-    const syncInstalledState = () => {
-      if (!busySkillId) {
-        void refreshMarketplace(false, { background: true });
-      }
-    };
-
-    const timer = window.setInterval(syncInstalledState, 15000);
-    window.addEventListener("focus", syncInstalledState);
-
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", syncInstalledState);
-    };
-  }, [busySkillId]);
-
-  useEffect(() => {
     let debounceTimer: number | null = null;
     let unlisten: (() => void) | null = null;
 

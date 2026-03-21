@@ -451,6 +451,28 @@ fn emit_source_notice(source_id: &str, message: &str) {
     emit_console_line(&format!("[source:{source_id}] {message}"));
 }
 
+fn format_network_error(error: reqwest::Error) -> String {
+    if error.is_timeout() {
+        return "网络请求超时，请稍后重试".to_string();
+    }
+
+    if error.is_connect() {
+        return "网络连接失败，请检查网络、代理或 GitHub 访问状态".to_string();
+    }
+
+    let mut details = error.to_string();
+    if let Some(url) = error.url() {
+        let url_text = url.as_str();
+        details = details.replace(url_text, "").trim().trim_matches(':').trim().to_string();
+    }
+
+    if details.is_empty() || details == "error sending request" {
+        "网络请求失败，请检查网络、代理或 GitHub 访问状态".to_string()
+    } else {
+        format!("网络请求失败: {details}")
+    }
+}
+
 fn is_mostly_chinese(text: &str) -> bool {
     if text.is_empty() {
         return false;
@@ -906,7 +928,7 @@ async fn fetch_github_contents(
         .get(url)
         .send()
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(format_network_error)?;
     if !response.status().is_success() {
         return Err(format!("GitHub API 请求失败: {}", response.status()));
     }
@@ -929,7 +951,7 @@ async fn fetch_raw_text(
         .get(url)
         .send()
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(format_network_error)?;
     if !response.status().is_success() {
         return Err(format!("获取文件失败: {}", response.status()));
     }
@@ -948,7 +970,7 @@ async fn fetch_github_tree(
         .get(url)
         .send()
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(format_network_error)?;
     if !response.status().is_success() {
         return Err(format!("GitHub Trees API 请求失败: {}", response.status()));
     }
@@ -979,7 +1001,7 @@ async fn fetch_latest_commit(
         .get(url)
         .send()
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(format_network_error)?;
     if !response.status().is_success() {
         return Ok(None);
     }
@@ -1025,10 +1047,10 @@ fn build_source_status(
     errors: Vec<String>,
 ) -> SourceStatus {
     let error = merge_unique_messages(errors);
-    let status = if error.is_some() {
-        "error"
-    } else if parsed_skill_count > 0 {
+    let status = if parsed_skill_count > 0 {
         "ok"
+    } else if error.is_some() {
+        "error"
     } else {
         "empty"
     };
@@ -1194,13 +1216,6 @@ async fn fetch_remote_skills(
 
             let skill_id = format!("{}:{}", source.id, skill_dir_name);
             if !seen_source_skill_ids.insert(skill_id.clone()) {
-                emit_source_notice(
-                    &source.id,
-                    &format!(
-                        "duplicated logical skill id {}, dropping path {}",
-                        skill_id, skill_base_path
-                    ),
-                );
                 continue;
             }
 
@@ -1409,7 +1424,7 @@ async fn check_cache_validity(
         .header("If-None-Match", etag)
         .send()
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(format_network_error)?;
 
     if response.status() == reqwest::StatusCode::NOT_MODIFIED {
         return Ok((true, None));
@@ -1439,7 +1454,7 @@ async fn fetch_repo_etag(
         .get(url)
         .send()
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(format_network_error)?;
 
     if !response.status().is_success() {
         return Ok(None);
@@ -1523,7 +1538,7 @@ async fn translate_batch_with_deepseek(
         .json(&body)
         .send()
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(format_network_error)?;
     if !response.status().is_success() {
         return Err(format!("DeepSeek 请求失败: {}", response.status()));
     }

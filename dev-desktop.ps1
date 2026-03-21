@@ -161,6 +161,20 @@ function Clear-StaleDevServer {
     Start-Sleep -Seconds 1
 }
 
+function Clear-StaleDesktopApp {
+    $processes = Get-Process -Name "skill-marketplace-desktop" -ErrorAction SilentlyContinue
+    if (-not $processes) {
+        return
+    }
+
+    foreach ($process in $processes) {
+        Write-Status "检测到残留桌面调试进程，正在停止: $($process.ProcessName) ($($process.Id))"
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    }
+
+    Start-Sleep -Seconds 1
+}
+
 Assert-Command -Name "node"
 Assert-Command -Name "npm"
 Assert-Command -Name "cargo"
@@ -173,6 +187,7 @@ if (-not $SkipInstall -and -not (Test-Path -LiteralPath $nodeModulesDir -PathTyp
 
 Import-MsvcEnvironment
 Clear-StaleDevServer
+Clear-StaleDesktopApp
 
 Write-Status ""
 Write-Status "启动桌面热更新开发环境..."
