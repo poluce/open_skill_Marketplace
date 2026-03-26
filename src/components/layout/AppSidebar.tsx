@@ -1,23 +1,21 @@
-import type { SurfaceKey, TabKey } from "../../app/types";
+import type { SurfaceKey } from "../../app/types";
 import { createStateList, getComponentAttrs } from "../../features/inspect";
 
 interface AppSidebarProps {
-  currentTab: TabKey;
-  installedTabCount: number;
+  downloadedSkillCount: number;
+  installedTargetCount: number;
   onExpandSidebar: () => void;
   onSurfaceChange: (surface: SurfaceKey) => void;
-  onTabChange: (tab: TabKey) => void;
   onToggleSidebar: () => void;
   sidebarCollapsed: boolean;
   surface: SurfaceKey;
 }
 
 export function AppSidebar({
-  currentTab,
-  installedTabCount,
+  downloadedSkillCount,
+  installedTargetCount,
   onExpandSidebar,
   onSurfaceChange,
-  onTabChange,
   onToggleSidebar,
   sidebarCollapsed,
   surface,
@@ -80,21 +78,16 @@ export function AppSidebar({
       >
         <button
           type="button"
-          className={`nav-item ${surface === "market" && currentTab === "available" ? "active" : ""}`}
-          onClick={() => {
-            onSurfaceChange("market");
-            onTabChange("available");
-          }}
+          className={`nav-item ${surface === "market" ? "active" : ""}`}
+          onClick={() => onSurfaceChange("market")}
           title={sidebarCollapsed ? "技能市场" : undefined}
           {...getComponentAttrs({
-            id: "nav-market-available",
+            id: "nav-market",
             label: "技能市场导航按钮",
             type: "导航按钮",
             location: "左侧导航",
             text: "技能市场",
-            state: createStateList(
-              surface === "market" && currentTab === "available" ? "已激活" : undefined,
-            ),
+            state: createStateList(surface === "market" ? "已激活" : undefined),
           })}
         >
           <span className="nav-label">技能市场</span>
@@ -102,26 +95,24 @@ export function AppSidebar({
 
         <button
           type="button"
-          className={`nav-item ${surface === "market" && currentTab === "installed" ? "active" : ""}`}
-          onClick={() => {
-            onSurfaceChange("market");
-            onTabChange("installed");
-          }}
-          title={sidebarCollapsed ? "已安装" : undefined}
+          className={`nav-item ${surface === "install" ? "active" : ""}`}
+          onClick={() => onSurfaceChange("install")}
+          title={sidebarCollapsed ? "安装" : undefined}
           {...getComponentAttrs({
-            id: "nav-market-installed",
-            label: "已安装导航按钮",
+            id: "nav-install",
+            label: "安装页面导航按钮",
             type: "导航按钮",
             location: "左侧导航",
-            text: "已安装",
-            state: createStateList(
-              surface === "market" && currentTab === "installed" ? "已激活" : undefined,
-            ),
-            context: { "已安装数量": installedTabCount },
+            text: "安装",
+            state: createStateList(surface === "install" ? "已激活" : undefined),
+            context: {
+              "已下载数量": downloadedSkillCount,
+              "安装目标数量": installedTargetCount,
+            },
           })}
         >
-          <span className="nav-label">已安装</span>
-          <strong>{installedTabCount}</strong>
+          <span className="nav-label">安装</span>
+          <strong>{downloadedSkillCount}</strong>
         </button>
       </nav>
 

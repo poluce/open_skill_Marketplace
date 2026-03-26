@@ -171,6 +171,11 @@ function formatMergedContext(chain: HTMLElement[]) {
   return entries.map(([key, value]) => `${key}: ${value}`).join("；");
 }
 
+function normalizeClipboardValue(value: string) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized || "无";
+}
+
 export function resolveComponentSnapshot(target: EventTarget | null, surface: string) {
   if (!(target instanceof HTMLElement)) {
     return null;
@@ -203,17 +208,19 @@ export function resolveComponentSnapshot(target: EventTarget | null, surface: st
 
 export function buildComponentClipboardText(component: ComponentSnapshot) {
   return [
-    `页面：${component.surface}`,
-    `组件名称：${component.label}`,
-    `组件标识：${component.id}`,
-    `类型：${component.type}`,
-    `位置：${component.location}`,
-    `层级路径：${component.path}`,
-    `显示文本：${component.visibleText}`,
-    `当前状态：${component.state}`,
-    `关联对象：${component.relatedContext}`,
-    "我的需求/问题：",
-  ].join("\n");
+    ["页面", component.surface],
+    ["组件名称", component.label],
+    ["组件标识", component.id],
+    ["类型", component.type],
+    ["位置", component.location],
+    ["层级路径", component.path],
+    ["显示文本", component.visibleText],
+    ["当前状态", component.state],
+    ["关联对象", component.relatedContext],
+  ]
+    .map(([key, value]) => `${key}=${normalizeClipboardValue(value)}`)
+    .join("；")
+    .concat("；我的需求=");
 }
 
 export function clampContextMenuPosition(x: number, y: number) {

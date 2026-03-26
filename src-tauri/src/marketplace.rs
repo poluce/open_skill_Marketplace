@@ -52,13 +52,6 @@ impl InstallMode {
             Self::Reference => "reference",
         }
     }
-
-    fn from_settings(value: &str) -> Self {
-        match value {
-            "copy" => Self::Copy,
-            _ => Self::Reference,
-        }
-    }
 }
 
 #[derive(Default)]
@@ -106,6 +99,18 @@ impl Default for AppSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SkillInstallTarget {
+    pub agent_type: String,
+    pub install_scope: String,
+    pub project_root: Option<String>,
+    pub install_mode: String,
+    pub install_path: String,
+    pub actual_path: String,
+    pub installed_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Skill {
     pub id: String,
     pub name: String,
@@ -114,23 +119,50 @@ pub struct Skill {
     pub icon: String,
     pub colors: [String; 2],
     pub is_featured: bool,
+    #[serde(default)]
     pub repo_link: Option<String>,
+    #[serde(default)]
     pub is_installed: Option<bool>,
+    #[serde(default)]
+    pub is_downloaded: Option<bool>,
+    #[serde(default)]
     pub repo_owner: Option<String>,
+    #[serde(default)]
     pub repo_name: Option<String>,
+    #[serde(default)]
     pub skill_path: Option<String>,
+    #[serde(default)]
     pub source: Option<String>,
+    #[serde(default)]
     pub branch: Option<String>,
+    #[serde(default)]
     pub translated_desc: Option<String>,
+    #[serde(default)]
     pub ai_category: Option<String>,
+    #[serde(default)]
     pub commit_sha: Option<String>,
+    #[serde(default)]
     pub last_updated: Option<u64>,
+    #[serde(default)]
     pub has_update: Option<bool>,
+    #[serde(default)]
     pub installed_version: Option<String>,
+    #[serde(default)]
+    pub downloaded_version: Option<String>,
+    #[serde(default)]
     pub is_local_modified: Option<bool>,
+    #[serde(default)]
     pub install_mode: Option<String>,
+    #[serde(default)]
     pub install_path: Option<String>,
+    #[serde(default)]
     pub actual_path: Option<String>,
+    #[serde(default)]
+    pub local_path: Option<String>,
+    #[serde(default)]
+    pub installed_target_count: Option<usize>,
+    #[serde(default)]
+    pub install_targets: Vec<SkillInstallTarget>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -327,8 +359,14 @@ struct DeepSeekTranslationItem {
 #[serde(rename_all = "camelCase")]
 struct SkillMetadata {
     skill_id: String,
-    installed_version: String,
-    installed_at: u64,
+    #[serde(
+        default = "default_downloaded_version",
+        alias = "installed_version",
+        alias = "installedVersion"
+    )]
+    downloaded_version: String,
+    #[serde(default, alias = "installed_at", alias = "installedAt")]
+    downloaded_at: u64,
     source: String,
     repo_owner: String,
     repo_name: String,
@@ -336,6 +374,8 @@ struct SkillMetadata {
     branch: String,
     #[serde(default)]
     manifest: BTreeMap<String, String>,
+    #[serde(default)]
+    install_targets: Vec<SkillInstallTarget>,
     #[serde(default)]
     install_mode: Option<String>,
     #[serde(default)]
@@ -347,10 +387,34 @@ struct SkillMetadata {
 #[derive(Debug, Clone)]
 struct InstalledSkillInfo {
     metadata: Option<SkillMetadata>,
-    is_local_modified: bool,
-    install_mode: InstallMode,
     install_path: PathBuf,
     actual_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct DownloadedSkillInfo {
+    metadata: SkillMetadata,
+    local_path: PathBuf,
+    is_local_modified: bool,
+    install_targets: Vec<SkillInstallTarget>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallDownloadedSkillRequest {
+    pub skill: Skill,
+    pub agent_type: String,
+    pub install_scope: String,
+    pub project_root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallSkillTargetRequest {
+    pub skill_id: String,
+    pub agent_type: String,
+    pub install_scope: String,
+    pub project_root: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -400,6 +464,10 @@ fn now_unix_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or(Duration::from_secs(0))
         .as_secs()
+}
+
+fn default_downloaded_version() -> String {
+    "unknown".to_string()
 }
 
 fn app_base_dir() -> Result<PathBuf, String> {
@@ -526,20 +594,33 @@ fn load_source_configs() -> Result<Vec<SkillSourceConfig>, String> {
     Ok(config.sources)
 }
 
-fn resolve_install_path(settings: &AppSettings) -> Result<PathBuf, String> {
-    let base_path = if settings.install_scope == "project" {
-        let root = settings.project_root.trim();
-        if root.is_empty() {
-            return Err("项目安装模式需要先选择一个项目目录".to_string());
-        }
+fn normalize_project_root(project_root: &str) -> Option<String> {
+    let trimmed = project_root.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn resolve_install_path_for_target(
+    agent_type: &str,
+    install_scope: &str,
+    project_root: Option<&str>,
+) -> Result<PathBuf, String> {
+    let base_path = if install_scope == "project" {
+        let root = project_root
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "项目安装模式需要先选择一个项目目录".to_string())?;
         PathBuf::from(root)
     } else {
         dirs::home_dir().ok_or_else(|| "无法获取用户主目录".to_string())?
     };
 
-    let install_path = match settings.agent_type.as_str() {
+    let install_path = match agent_type {
         "antigravity" => {
-            if settings.install_scope == "project" {
+            if install_scope == "project" {
                 base_path.join(".agent").join("skills")
             } else {
                 base_path
@@ -552,22 +633,24 @@ fn resolve_install_path(settings: &AppSettings) -> Result<PathBuf, String> {
         "claude" => base_path.join(".claude").join("skills"),
         "codex" => base_path.join(".codex").join("skills"),
         "opencode" => {
-            if settings.install_scope == "project" {
+            if install_scope == "project" {
                 base_path.join(".opencode").join("skill")
             } else {
                 base_path.join(".config").join("opencode").join("skill")
             }
         }
-        _ => return Err(format!("不支持的 Agent 类型: {}", settings.agent_type)),
+        _ => return Err(format!("不支持的 Agent 类型: {agent_type}")),
     };
 
     Ok(install_path)
 }
 
-fn ensure_install_dir(settings: &AppSettings) -> Result<PathBuf, String> {
-    let path = resolve_install_path(settings)?;
-    fs::create_dir_all(&path).map_err(|err| err.to_string())?;
-    Ok(path)
+fn resolve_install_path(settings: &AppSettings) -> Result<PathBuf, String> {
+    resolve_install_path_for_target(
+        &settings.agent_type,
+        &settings.install_scope,
+        Some(&settings.project_root),
+    )
 }
 
 fn preferred_storage_root() -> Result<PathBuf, String> {
@@ -608,31 +691,44 @@ fn ensure_storage_root(settings: &AppSettings) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn metadata_install_mode(metadata: Option<&SkillMetadata>, visible_path: &Path) -> InstallMode {
-    if let Some(mode) = metadata
-        .and_then(|value| value.install_mode.as_deref())
-        .map(InstallMode::from_settings)
-    {
-        return mode;
-    }
+fn get_target_visible_skill_dir(
+    agent_type: &str,
+    install_scope: &str,
+    project_root: Option<&str>,
+    skill_id: &str,
+) -> Result<PathBuf, String> {
+    Ok(resolve_install_path_for_target(agent_type, install_scope, project_root)?
+        .join(safe_dir_name(skill_id)))
+}
 
-    if metadata
-        .and_then(|value| value.actual_path.as_deref())
-        .map(PathBuf::from)
-        .map(|path| path != visible_path)
-        .unwrap_or(false)
-    {
-        return InstallMode::Reference;
-    }
+fn install_target_matches(
+    target: &SkillInstallTarget,
+    agent_type: &str,
+    install_scope: &str,
+    project_root: Option<&str>,
+) -> bool {
+    let normalized_project_root = project_root.and_then(normalize_project_root);
+    target.agent_type == agent_type
+        && target.install_scope == install_scope
+        && target.project_root == normalized_project_root
+}
 
-    if fs::symlink_metadata(visible_path)
-        .map(|value| value.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        return InstallMode::Reference;
+fn build_install_target(
+    agent_type: &str,
+    install_scope: &str,
+    project_root: Option<&str>,
+    install_path: &Path,
+    actual_path: &Path,
+) -> SkillInstallTarget {
+    SkillInstallTarget {
+        agent_type: agent_type.to_string(),
+        install_scope: install_scope.to_string(),
+        project_root: project_root.and_then(normalize_project_root),
+        install_mode: InstallMode::Reference.as_str().to_string(),
+        install_path: install_path.to_string_lossy().to_string(),
+        actual_path: actual_path.to_string_lossy().to_string(),
+        installed_at: now_unix_secs(),
     }
-
-    InstallMode::Copy
 }
 
 fn metadata_install_path(metadata: Option<&SkillMetadata>, fallback: &Path) -> PathBuf {
@@ -1232,6 +1328,7 @@ async fn fetch_remote_skills(
                     source.owner, source.repo, source.branch, skill_base_path
                 )),
                 is_installed: Some(false),
+                is_downloaded: Some(false),
                 repo_owner: Some(source.owner.clone()),
                 repo_name: Some(source.repo.clone()),
                 skill_path: Some(skill_base_path.clone()),
@@ -1243,10 +1340,14 @@ async fn fetch_remote_skills(
                 last_updated: None,
                 has_update: Some(false),
                 installed_version: None,
+                downloaded_version: None,
                 is_local_modified: Some(false),
                 install_mode: None,
                 install_path: None,
                 actual_path: None,
+                local_path: None,
+                installed_target_count: Some(0),
+                install_targets: Vec::new(),
             });
         }
 
@@ -1306,7 +1407,15 @@ fn load_new_cache(source_configs: &[SkillSourceConfig]) -> Result<Option<CacheFi
     }
 
     let content = fs::read_to_string(path).map_err(|err| err.to_string())?;
-    let cache = serde_json::from_str::<CacheFile>(&content).map_err(|err| err.to_string())?;
+    let cache = match serde_json::from_str::<CacheFile>(&content) {
+        Ok(value) => value,
+        Err(error) => {
+            emit_console_line(&format!(
+                "[cache] marketplace-cache.json 解析失败，已忽略并回退为重新拉取: {error}"
+            ));
+            return Ok(None);
+        }
+    };
     Ok(Some(normalize_cache(cache, source_configs, false)))
 }
 
@@ -1317,8 +1426,15 @@ fn load_legacy_cache(source_configs: &[SkillSourceConfig]) -> Result<Option<Cach
     }
 
     let content = fs::read_to_string(path).map_err(|err| err.to_string())?;
-    let legacy =
-        serde_json::from_str::<LegacyCacheFile>(&content).map_err(|err| err.to_string())?;
+    let legacy = match serde_json::from_str::<LegacyCacheFile>(&content) {
+        Ok(value) => value,
+        Err(error) => {
+            emit_console_line(&format!(
+                "[cache] marketplace_cache.json 解析失败，已忽略并回退为重新拉取: {error}"
+            ));
+            return Ok(None);
+        }
+    };
     Ok(Some(normalize_cache(
         CacheFile {
             version: CACHE_VERSION,
@@ -1898,21 +2014,17 @@ fn scan_installed_skills(
         }
 
         let metadata = read_metadata(&path)?;
-        let install_mode = metadata_install_mode(metadata.as_ref(), &path);
         let actual_path = metadata_actual_path(metadata.as_ref(), &path);
         let install_path = metadata_install_path(metadata.as_ref(), &path);
         let skill_id = metadata
             .as_ref()
             .map(|value| value.skill_id.clone())
             .unwrap_or_else(|| reverse_safe_dir_name(&entry.file_name().to_string_lossy()));
-        let is_local_modified = detect_local_modified(&actual_path, metadata.as_ref())?;
 
         result.insert(
             skill_id,
             InstalledSkillInfo {
                 metadata,
-                is_local_modified,
-                install_mode,
                 install_path,
                 actual_path,
             },
@@ -1922,86 +2034,288 @@ fn scan_installed_skills(
     Ok(result)
 }
 
-fn get_visible_skill_dir(settings: &AppSettings, skill_id: &str) -> Result<PathBuf, String> {
-    Ok(resolve_install_path(settings)?.join(safe_dir_name(skill_id)))
+fn fallback_downloaded_metadata(skill_id: &str, local_path: &Path) -> SkillMetadata {
+    SkillMetadata {
+        skill_id: skill_id.to_string(),
+        downloaded_version: "unknown".to_string(),
+        downloaded_at: 0,
+        source: "local".to_string(),
+        repo_owner: String::new(),
+        repo_name: String::new(),
+        skill_path: safe_dir_name(skill_id),
+        branch: String::new(),
+        manifest: BTreeMap::new(),
+        install_targets: Vec::new(),
+        install_mode: None,
+        install_path: None,
+        actual_path: Some(local_path.to_string_lossy().to_string()),
+    }
 }
 
-fn get_existing_install_info(
+fn scan_downloaded_skills(
     settings: &AppSettings,
-    skill_id: &str,
-) -> Result<Option<InstalledSkillInfo>, String> {
-    Ok(scan_installed_skills(settings)?.remove(skill_id))
-}
-
-fn remove_installed_skill_paths(visible_path: &Path, actual_path: &Path) -> Result<(), String> {
-    if visible_path.exists() {
-        if visible_path != actual_path {
-            #[cfg(target_family = "windows")]
-            {
-                let command = format!(r#"rmdir "{}""#, visible_path.display());
-                let status = Command::new("cmd")
-                    .args(["/C", &command])
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status()
-                    .map_err(|err| err.to_string())?;
-                if !status.success() {
-                    return Err("删除目录引用失败".to_string());
-                }
-            }
-            #[cfg(not(target_family = "windows"))]
-            {
-                fs::remove_file(visible_path).map_err(|err| err.to_string())?;
-            }
-        } else {
-            remove_link_path(visible_path)?;
-        }
+) -> Result<HashMap<String, DownloadedSkillInfo>, String> {
+    let storage_root = ensure_storage_root(settings)?;
+    if !storage_root.exists() {
+        return Ok(HashMap::new());
     }
 
-    if actual_path != visible_path && actual_path.exists() {
-        fs::remove_dir_all(actual_path).map_err(|err| err.to_string())?;
+    let mut result = HashMap::new();
+    for entry in fs::read_dir(&storage_root).map_err(|err| err.to_string())? {
+        let entry = entry.map_err(|err| err.to_string())?;
+        let local_path = entry.path();
+        if !local_path.is_dir() || !local_path.join("SKILL.md").exists() {
+            continue;
+        }
+
+        let skill_id = reverse_safe_dir_name(&entry.file_name().to_string_lossy());
+        let mut metadata = read_metadata(&local_path)?
+            .unwrap_or_else(|| fallback_downloaded_metadata(&skill_id, &local_path));
+        if metadata.skill_id.is_empty() {
+            metadata.skill_id = skill_id.clone();
+        }
+        if metadata.actual_path.is_none() {
+            metadata.actual_path = Some(local_path.to_string_lossy().to_string());
+        }
+
+        let install_targets = metadata
+            .install_targets
+            .iter()
+            .filter(|target| Path::new(&target.install_path).exists())
+            .cloned()
+            .collect::<Vec<_>>();
+        let is_local_modified = detect_local_modified(&local_path, Some(&metadata))?;
+
+        result.insert(
+            metadata.skill_id.clone(),
+            DownloadedSkillInfo {
+                metadata,
+                local_path,
+                is_local_modified,
+                install_targets,
+            },
+        );
+    }
+
+    Ok(result)
+}
+
+fn migrate_legacy_installed_skills(settings: &AppSettings) -> Result<(), String> {
+    let storage_root = ensure_storage_root(settings)?;
+    let installed = scan_installed_skills(settings)?;
+    if installed.is_empty() {
+        return Ok(());
+    }
+
+    for (skill_id, info) in installed {
+        let Some(mut metadata) = info.metadata.clone() else {
+            continue;
+        };
+        if !metadata.install_targets.is_empty()
+            && path_is_within(&info.actual_path, &storage_root)
+        {
+            continue;
+        }
+
+        let visible_path = get_target_visible_skill_dir(
+            &settings.agent_type,
+            &settings.install_scope,
+            Some(&settings.project_root),
+            &skill_id,
+        )?;
+        let local_path = storage_root.join(safe_dir_name(&skill_id));
+
+        if info.actual_path == info.install_path {
+            move_dir_recursive(&info.actual_path, &local_path)?;
+        } else if info.actual_path != local_path {
+            move_dir_recursive(&info.actual_path, &local_path)?;
+            if visible_path.exists() {
+                remove_link_path(&visible_path)?;
+            }
+        }
+
+        if !visible_path.exists() || visible_path != local_path {
+            create_reference_link(&local_path, &visible_path)?;
+        }
+
+        metadata.downloaded_at = if metadata.downloaded_at == 0 {
+            now_unix_secs()
+        } else {
+            metadata.downloaded_at
+        };
+        metadata.install_targets = vec![build_install_target(
+            &settings.agent_type,
+            &settings.install_scope,
+            Some(&settings.project_root),
+            &visible_path,
+            &local_path,
+        )];
+        metadata.install_mode = Some(InstallMode::Reference.as_str().to_string());
+        metadata.install_path = Some(visible_path.to_string_lossy().to_string());
+        metadata.actual_path = Some(local_path.to_string_lossy().to_string());
+        metadata.manifest = build_manifest(&local_path)?;
+        write_metadata(&local_path, &metadata)?;
     }
 
     Ok(())
 }
 
-fn resolve_skill_target_paths(
-    settings: &AppSettings,
-    skill_id: &str,
-    preferred_mode: InstallMode,
-    existing: Option<&InstalledSkillInfo>,
-) -> Result<(PathBuf, PathBuf, InstallMode), String> {
-    let visible_path = existing
-        .map(|info| info.install_path.clone())
-        .unwrap_or_else(|| get_visible_skill_dir(settings, skill_id).unwrap_or_default());
+fn repo_link_from_metadata(metadata: &SkillMetadata) -> Option<String> {
+    if metadata.repo_owner.is_empty()
+        || metadata.repo_name.is_empty()
+        || metadata.branch.is_empty()
+        || metadata.skill_path.is_empty()
+    {
+        return None;
+    }
 
-    let resolved_visible_path = if visible_path.as_os_str().is_empty() {
-        get_visible_skill_dir(settings, skill_id)?
+    Some(format!(
+        "https://github.com/{}/{}/tree/{}/{}",
+        metadata.repo_owner, metadata.repo_name, metadata.branch, metadata.skill_path
+    ))
+}
+
+fn source_visuals(
+    source_id: Option<&str>,
+    source_configs: &[SkillSourceConfig],
+) -> (String, [String; 2], bool) {
+    if let Some(source_id) = source_id {
+        if let Some(source) = source_configs.iter().find(|value| value.id == source_id) {
+            return (source.icon.clone(), source.colors.clone(), true);
+        }
+    }
+
+    (
+        "L".to_string(),
+        ["#6b7280".to_string(), "#334155".to_string()],
+        false,
+    )
+}
+
+async fn apply_downloaded_info_to_skill(
+    client: &Client,
+    skill: &mut Skill,
+    info: &DownloadedSkillInfo,
+) -> Result<(), String> {
+    skill.is_downloaded = Some(true);
+    skill.is_installed = Some(!info.install_targets.is_empty());
+    skill.is_local_modified = Some(info.is_local_modified);
+    skill.downloaded_version = Some(info.metadata.downloaded_version.clone());
+    skill.local_path = Some(info.local_path.to_string_lossy().to_string());
+    skill.installed_target_count = Some(info.install_targets.len());
+    skill.install_targets = info.install_targets.clone();
+    skill.install_mode = info
+        .install_targets
+        .first()
+        .map(|target| target.install_mode.clone())
+        .or_else(|| Some(InstallMode::Reference.as_str().to_string()));
+    skill.install_path = info
+        .install_targets
+        .first()
+        .map(|target| target.install_path.clone());
+    skill.actual_path = Some(info.local_path.to_string_lossy().to_string());
+    skill.installed_version = if info.install_targets.is_empty() {
+        None
     } else {
-        visible_path
+        Some(info.metadata.downloaded_version.clone())
     };
 
-    let mode = existing
-        .map(|info| info.install_mode)
-        .unwrap_or(preferred_mode);
+    if !info.is_local_modified
+        && !info.metadata.repo_owner.is_empty()
+        && !info.metadata.repo_name.is_empty()
+        && !info.metadata.branch.is_empty()
+        && !info.metadata.skill_path.is_empty()
+    {
+        if let Ok(Some((sha, timestamp))) = fetch_latest_commit(
+            client,
+            &info.metadata.repo_owner,
+            &info.metadata.repo_name,
+            &info.metadata.branch,
+            &info.metadata.skill_path,
+        )
+        .await
+        {
+            skill.commit_sha = Some(sha.clone());
+            skill.last_updated = Some(timestamp);
+            skill.has_update = Some(info.metadata.downloaded_version != sha);
+        }
+    }
 
-    let actual_path = if let Some(info) = existing {
-        info.actual_path.clone()
-    } else if mode == InstallMode::Reference {
-        ensure_storage_root(settings)?.join(safe_dir_name(skill_id))
+    Ok(())
+}
+
+fn build_local_only_skill(
+    info: &DownloadedSkillInfo,
+    source_configs: &[SkillSourceConfig],
+) -> Result<Skill, String> {
+    let readme_path = info.local_path.join("SKILL.md");
+    let content = fs::read_to_string(&readme_path).map_err(|err| err.to_string())?;
+    let metadata = parse_skill_frontmatter(&content);
+    let name = metadata
+        .get("name")
+        .cloned()
+        .unwrap_or_else(|| info.metadata.skill_id.clone());
+    let description = metadata
+        .get("description")
+        .cloned()
+        .unwrap_or_else(|| "本地技能".to_string());
+    let category = metadata
+        .get("category")
+        .cloned()
+        .unwrap_or_else(|| guess_category(&name, &description));
+    let source_id = if info.metadata.source.is_empty() {
+        Some("local")
     } else {
-        resolved_visible_path.clone()
+        Some(info.metadata.source.as_str())
     };
+    let (icon, colors, is_featured) = source_visuals(source_id, source_configs);
 
-    Ok((resolved_visible_path, actual_path, mode))
+    Ok(Skill {
+        id: info.metadata.skill_id.clone(),
+        name,
+        desc: description,
+        category: category.clone(),
+        icon,
+        colors,
+        is_featured,
+        repo_link: repo_link_from_metadata(&info.metadata),
+        is_installed: Some(!info.install_targets.is_empty()),
+        is_downloaded: Some(true),
+        repo_owner: (!info.metadata.repo_owner.is_empty()).then(|| info.metadata.repo_owner.clone()),
+        repo_name: (!info.metadata.repo_name.is_empty()).then(|| info.metadata.repo_name.clone()),
+        skill_path: (!info.metadata.skill_path.is_empty()).then(|| info.metadata.skill_path.clone()),
+        source: source_id.map(str::to_string),
+        branch: (!info.metadata.branch.is_empty()).then(|| info.metadata.branch.clone()),
+        translated_desc: None,
+        ai_category: Some(category),
+        commit_sha: None,
+        last_updated: None,
+        has_update: Some(false),
+        installed_version: if info.install_targets.is_empty() {
+            None
+        } else {
+            Some(info.metadata.downloaded_version.clone())
+        },
+        downloaded_version: Some(info.metadata.downloaded_version.clone()),
+        is_local_modified: Some(info.is_local_modified),
+        install_mode: info
+            .install_targets
+            .first()
+            .map(|target| target.install_mode.clone())
+            .or_else(|| Some(InstallMode::Reference.as_str().to_string())),
+        install_path: info
+            .install_targets
+            .first()
+            .map(|target| target.install_path.clone()),
+        actual_path: Some(info.local_path.to_string_lossy().to_string()),
+        local_path: Some(info.local_path.to_string_lossy().to_string()),
+        installed_target_count: Some(info.install_targets.len()),
+        install_targets: info.install_targets.clone(),
+    })
 }
 
 fn settings_require_install_migration(previous: &AppSettings, next: &AppSettings) -> bool {
-    previous.agent_type != next.agent_type
-        || previous.install_scope != next.install_scope
-        || previous.project_root != next.project_root
-        || previous.storage_root != next.storage_root
-        || previous.install_mode != next.install_mode
+    previous.storage_root != next.storage_root
 }
 
 fn path_is_within(child: &Path, root: &Path) -> bool {
@@ -2013,131 +2327,65 @@ fn migrate_installed_skills(previous: &AppSettings, next: &AppSettings) -> Resul
         return Ok(());
     }
 
-    let installed = scan_installed_skills(previous)?;
-    if installed.is_empty() {
+    let downloaded = scan_downloaded_skills(previous)?;
+    if downloaded.is_empty() {
         return Ok(());
     }
 
-    let old_storage_root = ensure_storage_root(previous).ok();
-    let new_storage_root = ensure_storage_root(next).ok();
-    let new_install_root = ensure_install_dir(next)?;
+    let new_storage_root = ensure_storage_root(next)?;
+    for (skill_id, info) in downloaded {
+        let old_local = info.local_path;
+        let new_local = new_storage_root.join(safe_dir_name(&skill_id));
+        move_dir_recursive(&old_local, &new_local)?;
 
-    for (skill_id, info) in installed {
-        let old_visible = info.install_path;
-        let old_actual = info.actual_path;
-        let install_mode = info.install_mode;
-        let new_visible = new_install_root.join(safe_dir_name(&skill_id));
-
-        let mut new_actual = if install_mode == InstallMode::Reference {
-            if let Some(root) = &new_storage_root {
-                root.join(safe_dir_name(&skill_id))
-            } else {
-                old_actual.clone()
+        let mut metadata = info.metadata.clone();
+        for target in metadata.install_targets.iter_mut() {
+            let visible_path = PathBuf::from(&target.install_path);
+            if visible_path.exists() {
+                remove_link_path(&visible_path)?;
             }
-        } else {
-            new_visible.clone()
-        };
-
-        if install_mode == InstallMode::Reference {
-            if let (Some(old_root), Some(new_root)) = (&old_storage_root, &new_storage_root) {
-                if path_is_within(&old_actual, old_root) && old_root != new_root {
-                    if old_actual.exists() {
-                        move_dir_recursive(&old_actual, &new_actual)?;
-                    }
-                } else {
-                    new_actual = old_actual.clone();
-                }
-            } else {
-                new_actual = old_actual.clone();
-            }
-
-            if old_visible.exists() && old_visible != new_visible {
-                if old_visible != old_actual {
-                    #[cfg(target_family = "windows")]
-                    {
-                        let command = format!(r#"rmdir "{}""#, old_visible.display());
-                        let status = Command::new("cmd")
-                            .args(["/C", &command])
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null())
-                            .status()
-                            .map_err(|err| err.to_string())?;
-                        if !status.success() {
-                            return Err("删除旧目录引用失败".to_string());
-                        }
-                    }
-                    #[cfg(not(target_family = "windows"))]
-                    {
-                        fs::remove_file(&old_visible).map_err(|err| err.to_string())?;
-                    }
-                } else {
-                    remove_link_path(&old_visible)?;
-                }
-            }
-            if let Some(parent) = new_visible.parent() {
+            if let Some(parent) = visible_path.parent() {
                 fs::create_dir_all(parent).map_err(|err| err.to_string())?;
             }
-            create_reference_link(&new_actual, &new_visible)?;
-        } else {
-            if old_actual.exists() && old_actual != new_actual {
-                move_dir_recursive(&old_actual, &new_actual)?;
-            }
-            if old_visible.exists() && old_visible != old_actual && old_visible != new_visible {
-                remove_link_path(&old_visible)?;
-            }
+            create_reference_link(&new_local, &visible_path)?;
+            target.actual_path = new_local.to_string_lossy().to_string();
         }
 
-        let metadata_target = if install_mode == InstallMode::Reference {
-            &new_actual
-        } else {
-            &new_visible
-        };
-        if let Some(mut metadata) = read_metadata(metadata_target)? {
-            metadata.install_mode = Some(install_mode.as_str().to_string());
-            metadata.install_path = Some(new_visible.to_string_lossy().to_string());
-            metadata.actual_path = Some(new_actual.to_string_lossy().to_string());
-            write_metadata(metadata_target, &metadata)?;
-        }
+        sync_metadata_primary_paths(&mut metadata, &new_local);
+        metadata.actual_path = Some(new_local.to_string_lossy().to_string());
+        write_metadata(&new_local, &metadata)?;
     }
 
     Ok(())
 }
 
-async fn attach_installation_state(
+async fn attach_downloaded_state(
     settings: &AppSettings,
-    skills: &mut [Skill],
+    source_configs: &[SkillSourceConfig],
+    skills: &mut Vec<Skill>,
 ) -> Result<(), String> {
-    let installed = scan_installed_skills(settings)?;
+    migrate_legacy_installed_skills(settings)?;
+    let downloaded = scan_downloaded_skills(settings)?;
     let client = create_http_client(&settings.github_token)?;
+    let mut seen_skill_ids = HashSet::new();
 
     for skill in skills.iter_mut() {
-        let Some(info) = installed.get(&skill.id) else {
+        seen_skill_ids.insert(skill.id.clone());
+        let Some(info) = downloaded.get(&skill.id) else {
             continue;
         };
 
-        skill.is_installed = Some(true);
-        skill.is_local_modified = Some(info.is_local_modified);
-        skill.install_mode = Some(info.install_mode.as_str().to_string());
-        skill.install_path = Some(info.install_path.to_string_lossy().to_string());
-        skill.actual_path = Some(info.actual_path.to_string_lossy().to_string());
-        if let Some(metadata) = &info.metadata {
-            skill.installed_version = Some(metadata.installed_version.clone());
-            if !info.is_local_modified {
-                if let Ok(Some((sha, timestamp))) = fetch_latest_commit(
-                    &client,
-                    &metadata.repo_owner,
-                    &metadata.repo_name,
-                    &metadata.branch,
-                    &metadata.skill_path,
-                )
-                .await
-                {
-                    skill.commit_sha = Some(sha.clone());
-                    skill.last_updated = Some(timestamp);
-                    skill.has_update = Some(metadata.installed_version != sha);
-                }
-            }
+        apply_downloaded_info_to_skill(&client, skill, info).await?;
+    }
+
+    for (skill_id, info) in downloaded {
+        if seen_skill_ids.contains(&skill_id) {
+            continue;
         }
+
+        let mut local_skill = build_local_only_skill(&info, source_configs)?;
+        apply_downloaded_info_to_skill(&client, &mut local_skill, &info).await?;
+        skills.push(local_skill);
     }
 
     Ok(())
@@ -2177,14 +2425,28 @@ async fn fetch_skill_files_recursive(
     Ok(files)
 }
 
-async fn install_skill_internal(
+fn resolve_downloaded_skill_path(settings: &AppSettings, skill_id: &str) -> Result<PathBuf, String> {
+    Ok(ensure_storage_root(settings)?.join(safe_dir_name(skill_id)))
+}
+
+fn sync_metadata_primary_paths(metadata: &mut SkillMetadata, local_path: &Path) {
+    metadata.actual_path = Some(local_path.to_string_lossy().to_string());
+    if let Some(primary_target) = metadata.install_targets.first() {
+        metadata.install_mode = Some(primary_target.install_mode.clone());
+        metadata.install_path = Some(primary_target.install_path.clone());
+    } else {
+        metadata.install_mode = Some(InstallMode::Reference.as_str().to_string());
+        metadata.install_path = None;
+    }
+}
+
+async fn sync_downloaded_skill_internal(
     app: Option<&AppHandle>,
     settings: &AppSettings,
     skill: &Skill,
     operation: &str,
-    preferred_mode: InstallMode,
-    existing: Option<&InstalledSkillInfo>,
-) -> Result<Option<String>, String> {
+    existing: Option<&DownloadedSkillInfo>,
+) -> Result<(), String> {
     let owner = skill
         .repo_owner
         .as_deref()
@@ -2202,137 +2464,102 @@ async fn install_skill_internal(
         .as_deref()
         .ok_or_else(|| "技能缺少 skillPath".to_string())?;
 
-    let _ = ensure_install_dir(settings)?;
-    let (visible_path, actual_path, mode) =
-        resolve_skill_target_paths(settings, &skill.id, preferred_mode, existing)?;
-    remove_installed_skill_paths(&visible_path, &actual_path)?;
-    fs::create_dir_all(&actual_path).map_err(|err| err.to_string())?;
+    let local_path = existing
+        .map(|info| info.local_path.clone())
+        .unwrap_or(resolve_downloaded_skill_path(settings, &skill.id)?);
+    let existing_targets = existing
+        .map(|info| info.install_targets.clone())
+        .unwrap_or_default();
 
-    let result = async {
-        let client = create_http_client(&settings.github_token)?;
-        let files =
-            fetch_skill_files_recursive(&client, owner, repo, skill_path, skill_path).await?;
-        if files.is_empty() {
-            return Err("没有找到可安装的文件".to_string());
+    if local_path.exists() {
+        fs::remove_dir_all(&local_path).map_err(|err| err.to_string())?;
+    }
+    fs::create_dir_all(&local_path).map_err(|err| err.to_string())?;
+
+    let client = create_http_client(&settings.github_token)?;
+    let files = fetch_skill_files_recursive(&client, owner, repo, skill_path, skill_path).await?;
+    if files.is_empty() {
+        return Err("没有找到可下载的文件".to_string());
+    }
+
+    if let Some(app_handle) = app {
+        emit_operation_progress(
+            app_handle,
+            &skill.id,
+            &skill.name,
+            operation,
+            format!("正在同步 {} 到本地仓库...", skill.name),
+            0,
+            files.len(),
+            false,
+        );
+    }
+
+    let total = files.len();
+    let mut completed = 0;
+    for file in files {
+        let target_path = local_path.join(&file.relative_path);
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).map_err(|err| err.to_string())?;
         }
 
+        let content = fetch_raw_text(&client, owner, repo, branch, &file.path).await?;
+        fs::write(&target_path, content).map_err(|err| err.to_string())?;
+        completed += 1;
         if let Some(app_handle) = app {
             emit_operation_progress(
                 app_handle,
                 &skill.id,
                 &skill.name,
                 operation,
-                format!("正在同步 {} 的文件...", skill.name),
-                0,
-                files.len(),
+                format!("正在同步文件 {completed}/{total}"),
+                completed,
+                total,
                 false,
             );
         }
-
-        let total = files.len();
-        let mut completed = 0;
-        for file in files {
-            let target_path = actual_path.join(&file.relative_path);
-            if let Some(parent) = target_path.parent() {
-                fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-            }
-
-            let content = fetch_raw_text(&client, owner, repo, branch, &file.path).await?;
-            fs::write(&target_path, content).map_err(|err| err.to_string())?;
-            completed += 1;
-            if let Some(app_handle) = app {
-                emit_operation_progress(
-                    app_handle,
-                    &skill.id,
-                    &skill.name,
-                    operation,
-                    format!("正在同步文件 {completed}/{total}"),
-                    completed,
-                    total,
-                    false,
-                );
-            }
-        }
-
-        let manifest = build_manifest(&actual_path)?;
-        let installed_version = fetch_latest_commit(&client, owner, repo, branch, skill_path)
-            .await?
-            .map(|value| value.0)
-            .unwrap_or_else(|| "unknown".to_string());
-
-        initialize_git_repo(&actual_path);
-
-        let mut install_mode = mode;
-        let mut warning = None;
-        if mode == InstallMode::Reference {
-            match create_reference_link(&actual_path, &visible_path) {
-                Ok(()) => {}
-                Err(error) => {
-                    copy_dir_recursive(&actual_path, &visible_path)?;
-                    fs::remove_dir_all(&actual_path).map_err(|err| err.to_string())?;
-                    install_mode = InstallMode::Copy;
-                    warning = Some(format!("目录引用创建失败，已回退为复制安装: {error}"));
-                }
-            }
-        }
-
-        let metadata = SkillMetadata {
-            skill_id: skill.id.clone(),
-            installed_version,
-            installed_at: now_unix_secs(),
-            source: skill.source.clone().unwrap_or_default(),
-            repo_owner: owner.to_string(),
-            repo_name: repo.to_string(),
-            skill_path: skill_path.to_string(),
-            branch: branch.to_string(),
-            manifest,
-            install_mode: Some(install_mode.as_str().to_string()),
-            install_path: Some(visible_path.to_string_lossy().to_string()),
-            actual_path: Some(if install_mode == InstallMode::Reference {
-                actual_path.to_string_lossy().to_string()
-            } else {
-                visible_path.to_string_lossy().to_string()
-            }),
-        };
-        let metadata_target = if install_mode == InstallMode::Reference {
-            &actual_path
-        } else {
-            &visible_path
-        };
-        write_metadata(metadata_target, &metadata)?;
-        if let Some(app_handle) = app {
-            emit_operation_progress(
-                app_handle,
-                &skill.id,
-                &skill.name,
-                operation,
-                format!("{} 已完成", skill.name),
-                total,
-                total,
-                true,
-            );
-        }
-        Ok(warning)
-    }
-    .await;
-
-    if result.is_err() {
-        let _ = remove_installed_skill_paths(&visible_path, &actual_path);
     }
 
-    result
-}
+    let manifest = build_manifest(&local_path)?;
+    let downloaded_version = fetch_latest_commit(&client, owner, repo, branch, skill_path)
+        .await?
+        .map(|value| value.0)
+        .unwrap_or_else(|| "unknown".to_string());
 
-fn resolve_installed_skill_paths(
-    settings: &AppSettings,
-    skill_id: &str,
-) -> Result<(PathBuf, PathBuf, InstallMode), String> {
-    if let Some(existing) = get_existing_install_info(settings, skill_id)? {
-        return Ok((existing.install_path, existing.actual_path, existing.install_mode));
+    initialize_git_repo(&local_path);
+
+    let mut metadata = SkillMetadata {
+        skill_id: skill.id.clone(),
+        downloaded_version,
+        downloaded_at: now_unix_secs(),
+        source: skill.source.clone().unwrap_or_default(),
+        repo_owner: owner.to_string(),
+        repo_name: repo.to_string(),
+        skill_path: skill_path.to_string(),
+        branch: branch.to_string(),
+        manifest,
+        install_targets: existing_targets,
+        install_mode: Some(InstallMode::Reference.as_str().to_string()),
+        install_path: None,
+        actual_path: Some(local_path.to_string_lossy().to_string()),
+    };
+    sync_metadata_primary_paths(&mut metadata, &local_path);
+    write_metadata(&local_path, &metadata)?;
+
+    if let Some(app_handle) = app {
+        emit_operation_progress(
+            app_handle,
+            &skill.id,
+            &skill.name,
+            operation,
+            format!("{} 已同步到本地仓库", skill.name),
+            total,
+            total,
+            true,
+        );
     }
 
-    let visible_path = get_visible_skill_dir(settings, skill_id)?;
-    Ok((visible_path.clone(), visible_path, InstallMode::Copy))
+    Ok(())
 }
 
 #[tauri::command]
@@ -2346,7 +2573,7 @@ pub async fn load_marketplace(
     let source_configs = load_source_configs()?;
     let (mut skills, source_statuses, from_cache, warning) =
         get_skills_with_cache(&settings, &source_configs, force_refresh).await?;
-    attach_installation_state(&settings, &mut skills).await?;
+    attach_downloaded_state(&settings, &source_configs, &mut skills).await?;
     let warning = merge_warnings(warning, hydrate_translations(&settings, &mut skills).await?);
 
     let resolved_install_path = resolve_install_path(&settings)
@@ -2381,130 +2608,231 @@ pub async fn save_settings(
     Ok(settings)
 }
 
+fn get_downloaded_skill_info(
+    settings: &AppSettings,
+    skill_id: &str,
+) -> Result<Option<DownloadedSkillInfo>, String> {
+    Ok(scan_downloaded_skills(settings)?.remove(skill_id))
+}
+
+fn target_label(agent_type: &str, install_scope: &str) -> String {
+    let agent_name = match agent_type {
+        "antigravity" => "Antigravity",
+        "gemini" => "Gemini",
+        "claude" => "Claude Code",
+        "codex" => "Codex",
+        "opencode" => "Open Code",
+        _ => agent_type,
+    };
+    let scope_name = if install_scope == "project" { "项目" } else { "全局" };
+    format!("{agent_name} / {scope_name}")
+}
+
+async fn install_downloaded_skill_internal(
+    app: &AppHandle,
+    settings: &AppSettings,
+    request: &InstallDownloadedSkillRequest,
+) -> Result<(), String> {
+    let downloaded = get_downloaded_skill_info(settings, &request.skill.id)?
+        .ok_or_else(|| "技能尚未下载，请先下载到本地仓库。".to_string())?;
+    let project_root = normalize_project_root(&request.project_root);
+    let visible_path = get_target_visible_skill_dir(
+        &request.agent_type,
+        &request.install_scope,
+        project_root.as_deref(),
+        &request.skill.id,
+    )?;
+
+    emit_operation_progress(
+        app,
+        &request.skill.id,
+        &request.skill.name,
+        "install-target",
+        format!("正在安装到 {}...", target_label(&request.agent_type, &request.install_scope)),
+        0,
+        1,
+        false,
+    );
+
+    if let Some(parent) = visible_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    if visible_path.exists() {
+        remove_link_path(&visible_path)?;
+    }
+    create_reference_link(&downloaded.local_path, &visible_path)?;
+
+    let mut metadata = downloaded.metadata.clone();
+    metadata.install_targets.retain(|target| {
+        !install_target_matches(
+            target,
+            &request.agent_type,
+            &request.install_scope,
+            project_root.as_deref(),
+        )
+    });
+    metadata.install_targets.push(build_install_target(
+        &request.agent_type,
+        &request.install_scope,
+        project_root.as_deref(),
+        &visible_path,
+        &downloaded.local_path,
+    ));
+    sync_metadata_primary_paths(&mut metadata, &downloaded.local_path);
+    write_metadata(&downloaded.local_path, &metadata)?;
+
+    emit_operation_progress(
+        app,
+        &request.skill.id,
+        &request.skill.name,
+        "install-target",
+        format!("{} 已安装到 {}", request.skill.name, target_label(&request.agent_type, &request.install_scope)),
+        1,
+        1,
+        true,
+    );
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn download_skill(app: AppHandle, skill: Skill) -> Result<OperationResult, String> {
+    let settings = load_settings(&app)?;
+    let existing = get_downloaded_skill_info(&settings, &skill.id)?;
+    if let Err(error) =
+        sync_downloaded_skill_internal(Some(&app), &settings, &skill, "download", existing.as_ref())
+            .await
+    {
+        emit_operation_progress(
+            &app,
+            &skill.id,
+            &skill.name,
+            "download",
+            error.clone(),
+            1,
+            1,
+            true,
+        );
+        return Err(error);
+    }
+
+    Ok(OperationResult {
+        message: format!("已下载 {} 到本地仓库", skill.name),
+        warning: None,
+    })
+}
+
 #[tauri::command]
 pub async fn install_skill(app: AppHandle, skill: Skill) -> Result<OperationResult, String> {
     let settings = load_settings(&app)?;
-    let warning = match install_skill_internal(
-        Some(&app),
-        &settings,
-        &skill,
-        "install",
-        InstallMode::from_settings(&settings.install_mode),
-        None,
-    )
-    .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            emit_operation_progress(
-                &app,
-                &skill.id,
-                &skill.name,
-                "install",
-                error.clone(),
-                1,
-                1,
-                true,
-            );
-            return Err(error);
-        }
+    let request = InstallDownloadedSkillRequest {
+        skill: skill.clone(),
+        agent_type: settings.agent_type.clone(),
+        install_scope: settings.install_scope.clone(),
+        project_root: settings.project_root.clone(),
     };
+    install_downloaded_skill_internal(&app, &settings, &request).await?;
     Ok(OperationResult {
-        message: format!("已安装 {}", skill.name),
-        warning,
+        message: format!(
+            "已将 {} 安装到 {}",
+            skill.name,
+            target_label(&request.agent_type, &request.install_scope)
+        ),
+        warning: None,
+    })
+}
+
+#[tauri::command]
+pub async fn install_downloaded_skill(
+    app: AppHandle,
+    request: InstallDownloadedSkillRequest,
+) -> Result<OperationResult, String> {
+    let settings = load_settings(&app)?;
+    install_downloaded_skill_internal(&app, &settings, &request).await?;
+    Ok(OperationResult {
+        message: format!(
+            "已将 {} 安装到 {}",
+            request.skill.name,
+            target_label(&request.agent_type, &request.install_scope)
+        ),
+        warning: None,
     })
 }
 
 #[tauri::command]
 pub async fn update_skill(app: AppHandle, skill: Skill) -> Result<OperationResult, String> {
     let settings = load_settings(&app)?;
-    let existing = get_existing_install_info(&settings, &skill.id)?;
-    let preferred_mode = existing
-        .as_ref()
-        .map(|value| value.install_mode)
-        .unwrap_or_else(|| InstallMode::from_settings(&settings.install_mode));
-    let warning = match install_skill_internal(
-        Some(&app),
-        &settings,
-        &skill,
-        "update",
-        preferred_mode,
-        existing.as_ref(),
-    )
-    .await
+    let existing = get_downloaded_skill_info(&settings, &skill.id)?
+        .ok_or_else(|| "技能尚未下载，无法更新。".to_string())?;
+    if let Err(error) =
+        sync_downloaded_skill_internal(Some(&app), &settings, &skill, "update", Some(&existing))
+            .await
     {
-        Ok(value) => value,
-        Err(error) => {
-            emit_operation_progress(
-                &app,
-                &skill.id,
-                &skill.name,
-                "update",
-                error.clone(),
-                1,
-                1,
-                true,
-            );
-            return Err(error);
-        }
+        emit_operation_progress(
+            &app,
+            &skill.id,
+            &skill.name,
+            "update",
+            error.clone(),
+            1,
+            1,
+            true,
+        );
+        return Err(error);
     };
+
     Ok(OperationResult {
-        message: format!("已更新 {}", skill.name),
-        warning,
+        message: format!("已更新 {} 的本地仓库", skill.name),
+        warning: None,
     })
 }
 
 #[tauri::command]
 pub async fn restore_skill(app: AppHandle, skill: Skill) -> Result<OperationResult, String> {
     let settings = load_settings(&app)?;
-    let existing = get_existing_install_info(&settings, &skill.id)?;
+    let existing = get_downloaded_skill_info(&settings, &skill.id)?
+        .ok_or_else(|| "技能尚未下载，无法恢复。".to_string())?;
     let mut warning = None;
 
-    if let Some(info) = existing.as_ref() {
+    emit_operation_progress(
+        &app,
+        &skill.id,
+        &skill.name,
+        "restore",
+        format!("正在恢复 {} 的官方版本...", skill.name),
+        0,
+        1,
+        false,
+    );
+    if restore_from_git(&existing.local_path) {
+        let mut metadata = existing.metadata.clone();
+        metadata.manifest = build_manifest(&existing.local_path)?;
+        sync_metadata_primary_paths(&mut metadata, &existing.local_path);
+        write_metadata(&existing.local_path, &metadata)?;
         emit_operation_progress(
             &app,
             &skill.id,
             &skill.name,
             "restore",
-            format!("正在恢复 {} 的官方版本...", skill.name),
-            0,
+            format!("{} 已恢复完成", skill.name),
             1,
-            false,
+            1,
+            true,
         );
-        if restore_from_git(&info.actual_path) {
-            emit_operation_progress(
-                &app,
-                &skill.id,
-                &skill.name,
-                "restore",
-                format!("{} 已恢复完成", skill.name),
-                1,
-                1,
-                true,
-            );
-            return Ok(OperationResult {
-                message: format!("已恢复 {} 的官方版本", skill.name),
-                warning: None,
-            });
-        }
+        return Ok(OperationResult {
+            message: format!("已恢复 {} 的官方版本", skill.name),
+            warning: None,
+        });
+    }
 
+    if existing.is_local_modified {
         warning = Some("本地 Git 基线不可用，已改为重新下载安装官方版本。".to_string());
     }
 
-    let preferred_mode = existing
-        .as_ref()
-        .map(|value| value.install_mode)
-        .unwrap_or_else(|| InstallMode::from_settings(&settings.install_mode));
-    let reinstall_warning = install_skill_internal(
-        Some(&app),
-        &settings,
-        &skill,
-        "restore",
-        preferred_mode,
-        existing.as_ref(),
-    )
-    .await
-    .map_err(|error| {
+    if let Err(error) =
+        sync_downloaded_skill_internal(Some(&app), &settings, &skill, "restore", Some(&existing))
+            .await
+    {
         emit_operation_progress(
             &app,
             &skill.id,
@@ -2515,14 +2843,9 @@ pub async fn restore_skill(app: AppHandle, skill: Skill) -> Result<OperationResu
             1,
             true,
         );
-        error
-    })?;
-    let warning = match (warning, reinstall_warning) {
-        (Some(left), Some(right)) => Some(format!("{left}\n{right}")),
-        (Some(left), None) => Some(left),
-        (None, Some(right)) => Some(right),
-        (None, None) => None,
-    };
+        return Err(error);
+    }
+
     Ok(OperationResult {
         message: format!("已恢复 {} 的官方版本", skill.name),
         warning,
@@ -2530,25 +2853,115 @@ pub async fn restore_skill(app: AppHandle, skill: Skill) -> Result<OperationResu
 }
 
 #[tauri::command]
-pub fn uninstall_skill(app: AppHandle, skill_id: String) -> Result<OperationResult, String> {
+pub fn uninstall_skill_target(
+    app: AppHandle,
+    request: UninstallSkillTargetRequest,
+) -> Result<OperationResult, String> {
     let settings = load_settings(&app)?;
+    let downloaded = get_downloaded_skill_info(&settings, &request.skill_id)?
+        .ok_or_else(|| "技能尚未下载，无法卸载安装目标。".to_string())?;
+    let project_root = normalize_project_root(&request.project_root);
+    let visible_path = get_target_visible_skill_dir(
+        &request.agent_type,
+        &request.install_scope,
+        project_root.as_deref(),
+        &request.skill_id,
+    )?;
+
     emit_operation_progress(
         &app,
-        &skill_id,
-        &skill_id,
-        "uninstall",
-        "正在删除技能...".to_string(),
+        &request.skill_id,
+        &request.skill_id,
+        "uninstall-target",
+        format!("正在卸载 {}...", target_label(&request.agent_type, &request.install_scope)),
         0,
         1,
         false,
     );
-    let (visible_path, actual_path, _) = resolve_installed_skill_paths(&settings, &skill_id)?;
-    if let Err(error) = remove_installed_skill_paths(&visible_path, &actual_path) {
+
+    if visible_path.exists() {
+        remove_link_path(&visible_path)?;
+    }
+
+    let mut metadata = downloaded.metadata.clone();
+    metadata.install_targets.retain(|target| {
+        !install_target_matches(
+            target,
+            &request.agent_type,
+            &request.install_scope,
+            project_root.as_deref(),
+        )
+    });
+    sync_metadata_primary_paths(&mut metadata, &downloaded.local_path);
+    write_metadata(&downloaded.local_path, &metadata)?;
+
+    emit_operation_progress(
+        &app,
+        &request.skill_id,
+        &request.skill_id,
+        "uninstall-target",
+        format!("已卸载 {}", target_label(&request.agent_type, &request.install_scope)),
+        1,
+        1,
+        true,
+    );
+
+    Ok(OperationResult {
+        message: format!(
+            "已卸载 {} 的安装入口",
+            target_label(&request.agent_type, &request.install_scope)
+        ),
+        warning: None,
+    })
+}
+
+#[tauri::command]
+pub fn uninstall_skill(app: AppHandle, skill_id: String) -> Result<OperationResult, String> {
+    let settings = load_settings(&app)?;
+    let downloaded = get_downloaded_skill_info(&settings, &skill_id)?
+        .ok_or_else(|| "技能尚未下载。".to_string())?;
+    let target = downloaded
+        .install_targets
+        .first()
+        .cloned()
+        .ok_or_else(|| "当前技能没有可卸载的安装目标。".to_string())?;
+    uninstall_skill_target(
+        app,
+        UninstallSkillTargetRequest {
+            skill_id,
+            agent_type: target.agent_type,
+            install_scope: target.install_scope,
+            project_root: target.project_root.unwrap_or_default(),
+        },
+    )
+}
+
+#[tauri::command]
+pub fn delete_downloaded_skill(app: AppHandle, skill_id: String) -> Result<OperationResult, String> {
+    let settings = load_settings(&app)?;
+    let downloaded = get_downloaded_skill_info(&settings, &skill_id)?
+        .ok_or_else(|| "技能尚未下载。".to_string())?;
+    if !downloaded.install_targets.is_empty() {
+        return Err("该技能仍有已安装目标，请先卸载所有安装入口。".to_string());
+    }
+
+    emit_operation_progress(
+        &app,
+        &skill_id,
+        &skill_id,
+        "delete-download",
+        "正在删除本地技能仓库...".to_string(),
+        0,
+        1,
+        false,
+    );
+
+    if let Err(error) = fs::remove_dir_all(&downloaded.local_path).map_err(|err| err.to_string()) {
         emit_operation_progress(
             &app,
             &skill_id,
             &skill_id,
-            "uninstall",
+            "delete-download",
             error.clone(),
             1,
             1,
@@ -2560,15 +2973,15 @@ pub fn uninstall_skill(app: AppHandle, skill_id: String) -> Result<OperationResu
         &app,
         &skill_id,
         &skill_id,
-        "uninstall",
-        "技能已删除".to_string(),
+        "delete-download",
+        "本地技能仓库已删除".to_string(),
         1,
         1,
         true,
     );
 
     Ok(OperationResult {
-        message: "技能已删除".to_string(),
+        message: "本地技能仓库已删除".to_string(),
         warning: None,
     })
 }
@@ -2580,23 +2993,19 @@ pub fn save_skill_readme(
     markdown: String,
 ) -> Result<OperationResult, String> {
     let settings = load_settings(&app)?;
-    let (_, actual_path, install_mode) = resolve_installed_skill_paths(&settings, &skill_id)?;
-    let readme_path = actual_path.join("SKILL.md");
+    let downloaded = get_downloaded_skill_info(&settings, &skill_id)?
+        .ok_or_else(|| "技能尚未下载。".to_string())?;
+    let readme_path = downloaded.local_path.join("SKILL.md");
     if !readme_path.exists() {
         return Err("未找到本地 SKILL.md".to_string());
     }
 
     fs::write(&readme_path, markdown).map_err(|err| err.to_string())?;
 
-    let metadata_target = if install_mode == InstallMode::Reference {
-        actual_path.clone()
-    } else {
-        get_visible_skill_dir(&settings, &skill_id)?
-    };
-    if let Some(mut metadata) = read_metadata(&metadata_target)? {
-        metadata.manifest = build_manifest(&metadata_target)?;
-        write_metadata(&metadata_target, &metadata)?;
-    }
+    let mut metadata = downloaded.metadata.clone();
+    metadata.manifest = build_manifest(&downloaded.local_path)?;
+    sync_metadata_primary_paths(&mut metadata, &downloaded.local_path);
+    write_metadata(&downloaded.local_path, &metadata)?;
 
     Ok(OperationResult {
         message: "本地 README 已保存".to_string(),
@@ -2607,17 +3016,15 @@ pub fn save_skill_readme(
 #[tauri::command]
 pub async fn get_skill_detail(app: AppHandle, skill: Skill) -> Result<SkillDetail, String> {
     let settings = load_settings(&app)?;
-    if let Ok((_, actual_path, _)) = resolve_installed_skill_paths(&settings, &skill.id) {
-        if actual_path.exists() {
-            let readme_path = actual_path.join("SKILL.md");
-            if readme_path.exists() {
-                let markdown = fs::read_to_string(&readme_path).map_err(|err| err.to_string())?;
-                return Ok(SkillDetail {
-                    markdown,
-                    source_url: skill.repo_link.unwrap_or_default(),
-                    local_path: Some(readme_path.to_string_lossy().to_string()),
-                });
-            }
+    if let Some(downloaded) = get_downloaded_skill_info(&settings, &skill.id)? {
+        let readme_path = downloaded.local_path.join("SKILL.md");
+        if readme_path.exists() {
+            let markdown = fs::read_to_string(&readme_path).map_err(|err| err.to_string())?;
+            return Ok(SkillDetail {
+                markdown,
+                source_url: skill.repo_link.unwrap_or_default(),
+                local_path: Some(readme_path.to_string_lossy().to_string()),
+            });
         }
     }
 

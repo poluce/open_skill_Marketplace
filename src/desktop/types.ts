@@ -11,6 +11,16 @@ export interface AppSettings {
   storageRoot: string;
 }
 
+export interface InstallTarget {
+  agentType: string;
+  installScope: string;
+  projectRoot?: string;
+  installMode: string;
+  installPath: string;
+  actualPath: string;
+  installedAt: number;
+}
+
 export interface Skill {
   id: string;
   name: string;
@@ -21,6 +31,7 @@ export interface Skill {
   isFeatured: boolean;
   repoLink?: string;
   isInstalled?: boolean;
+  isDownloaded?: boolean;
   repoOwner?: string;
   repoName?: string;
   skillPath?: string;
@@ -32,10 +43,14 @@ export interface Skill {
   lastUpdated?: number;
   hasUpdate?: boolean;
   installedVersion?: string;
+  downloadedVersion?: string;
   isLocalModified?: boolean;
   installMode?: string;
   installPath?: string;
   actualPath?: string;
+  localPath?: string;
+  installedTargetCount?: number;
+  installTargets: InstallTarget[];
 }
 
 export interface SkillSourceConfig {
@@ -83,4 +98,18 @@ export interface SkillDetail {
 export interface OperationResult {
   message: string;
   warning?: string;
+}
+
+export interface InstallDownloadedSkillRequest {
+  skill: Skill;
+  agentType: string;
+  installScope: string;
+  projectRoot: string;
+}
+
+export interface UninstallSkillTargetRequest {
+  skillId: string;
+  agentType: string;
+  installScope: string;
+  projectRoot: string;
 }

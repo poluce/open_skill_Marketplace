@@ -6,14 +6,8 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import {
-  getSkillDetail,
-  installSkill,
   loadMarketplace,
-  restoreSkill,
-  saveSkillReadme,
   saveSettings,
-  uninstallSkill,
-  updateSkill,
 } from "./desktop/api";
 import { listen } from "@tauri-apps/api/event";
 import { AppSidebar } from "./components/layout/AppSidebar";
@@ -23,13 +17,11 @@ import type {
   OperationProgressState,
   StatusState,
   SurfaceKey,
-  TabKey,
 } from "./app/types";
 import type {
   AppSettings,
   MarketplacePayload,
   Skill,
-  SkillDetail,
 } from "./desktop/types";
 import {
   buildComponentClipboardText,
@@ -41,10 +33,7 @@ import {
   type ContextMenuState,
 } from "./features/inspect";
 import {
-  confirmDanger,
   copyTextToClipboard,
-  openExternalUrl,
-  openLocalPath,
   pickDirectory,
 } from "./platform/desktop";
 import {
@@ -75,17 +64,16 @@ const EMPTY_SETTINGS: AppSettings = {
   storageRoot: "",
 };
 
-type SkillAction =
-  | "install"
-  | "update"
-  | "restore"
-  | "uninstall"
-  | "openRepo"
-  | "openDir"
-  | "openReadme";
+type QuickInstallSettingKey = "agentType" | "installScope";
 
 function getSurfaceLabel(surface: SurfaceKey) {
-  return surface === "settings" ? "应用设置" : "技能市场";
+  if (surface === "settings") {
+    return "应用设置";
+  }
+  if (surface === "install") {
+    return "安装";
+  }
+  return "技能市场";
 }
 
 function formatUpdatedAt(value?: number) {
@@ -117,6 +105,10 @@ function getSourceDisplayName(sourceId: string | undefined, sourceConfigs: Marke
     return "-";
   }
 
+  if (sourceId === "local") {
+    return "本地";
+  }
+
   return sourceConfigs.find((config) => config.id === sourceId)?.displayName || sourceId;
 }
 
@@ -139,13 +131,18 @@ function getRuntimeStatusText(
   return "就绪";
 }
 
-function getInstallModeLabel(mode?: string) {
-  return mode === "copy" ? "复制安装" : "引用安装";
+function getAgentLabel(agentType: string) {
+  return AGENT_OPTIONS.find((option) => option.value === agentType)?.label || agentType;
+}
+
+function getInstallScopeLabel(scope?: string) {
+  return scope === "project" ? "项目" : "全局";
 }
 
 function getSkillStatusLabels(skill: Skill) {
   return createStateList(
-    skill.isInstalled ? "已安装" : "未安装",
+    skill.isDownloaded ? "已下载" : "未下载",
+    skill.installedTargetCount ? `已安装 ${skill.installedTargetCount} 个目标` : undefined,
     skill.hasUpdate ? "可更新" : undefined,
     skill.isLocalModified ? "本地已修改" : undefined,
     skill.isFeatured ? "精选" : undefined,
@@ -169,21 +166,16 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarPreferenceHydrated, setSidebarPreferenceHydrated] = useState(false);
   const [selectedSkillId, setSelectedSkillId] = useState("");
-  const [selectedDetail, setSelectedDetail] = useState<SkillDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailDraft, setDetailDraft] = useState("");
-  const [detailSaving, setDetailSaving] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [busySkillId, setBusySkillId] = useState<string | null>(null);
   const [status, setStatus] = useState<StatusState | null>(null);
   const [operationProgress, setOperationProgress] = useState<OperationProgressState | null>(null);
   const [searchText, setSearchText] = useState("");
-  const [currentTab, setCurrentTab] = useState<TabKey>("available");
   const [activeCategory, setActiveCategory] = useState("全部");
   const [activeSource, setActiveSource] = useState("全部");
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [copyingComponentId, setCopyingComponentId] = useState<string | null>(null);
   const [inspectMode, setInspectMode] = useState(false);
+  const [savingQuickSetting, setSavingQuickSetting] = useState<QuickInstallSettingKey | null>(null);
   const deferredSearch = useDeferredValue(searchText);
 
   async function refreshMarketplace(
@@ -267,10 +259,6 @@ export function App() {
     let unlisten: (() => void) | null = null;
 
     void listen<string>("skill-storage-changed", () => {
-      if (busySkillId) {
-        return;
-      }
-
       if (debounceTimer) {
         window.clearTimeout(debounceTimer);
       }
@@ -288,7 +276,7 @@ export function App() {
       }
       unlisten?.();
     };
-  }, [busySkillId]);
+  }, []);
 
   useEffect(() => {
     let resetTimer: number | null = null;
@@ -365,8 +353,18 @@ export function App() {
     }
   }, [activeCategory, activeSource]);
 
-  const filteredSkills = useMemo(() => {
-    return skills.filter((skill) => {
+  const marketSkills = useMemo(
+    () => skills.filter((skill) => skill.source !== "local"),
+    [skills],
+  );
+
+  const downloadedSkills = useMemo(
+    () => skills.filter((skill) => Boolean(skill.isDownloaded)),
+    [skills],
+  );
+
+  const filteredMarketSkills = useMemo(() => {
+    return marketSkills.filter((skill) => {
       const visibleDescription = getVisibleDescription(skill, settingsDraft);
       const visibleCategory = getVisibleCategory(skill, settingsDraft);
       const matchesText =
@@ -387,14 +385,24 @@ export function App() {
 
       return matchesText && matchesCategory && matchesSource;
     });
-  }, [skills, settingsDraft, deferredSearch, activeCategory, activeSource]);
+  }, [marketSkills, settingsDraft, deferredSearch, activeCategory, activeSource]);
 
-  const installedFilteredSkills = useMemo(
-    () => filteredSkills.filter((skill) => Boolean(skill.isInstalled)),
-    [filteredSkills],
+  const filteredDownloadedSkills = useMemo(() => {
+    return downloadedSkills.filter((skill) => {
+      const visibleDescription = getVisibleDescription(skill, settingsDraft);
+      return (
+        !deferredSearch ||
+        skill.name.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+        skill.desc.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+        visibleDescription.toLowerCase().includes(deferredSearch.toLowerCase())
+      );
+    });
+  }, [downloadedSkills, settingsDraft, deferredSearch]);
+
+  const visibleSkills = useMemo(
+    () => (surface === "install" ? filteredDownloadedSkills : filteredMarketSkills),
+    [filteredDownloadedSkills, filteredMarketSkills, surface],
   );
-
-  const visibleSkills = currentTab === "installed" ? installedFilteredSkills : filteredSkills;
 
   useEffect(() => {
     if (surface === "settings") {
@@ -417,45 +425,6 @@ export function App() {
     visibleSkills.find((skill) => skill.id === selectedSkillId) ||
     skills.find((skill) => skill.id === selectedSkillId) ||
     null;
-
-  useEffect(() => {
-    if (!selectedSkill || surface === "settings") {
-      setSelectedDetail(null);
-      setDetailDraft("");
-      return;
-    }
-
-    let cancelled = false;
-    setDetailLoading(true);
-    void getSkillDetail(selectedSkill)
-      .then((detail) => {
-        if (!cancelled) {
-          setSelectedDetail(detail);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setSelectedDetail(null);
-          setStatus({
-            tone: "error",
-            text: error instanceof Error ? error.message : String(error),
-          });
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setDetailLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedSkill, surface]);
-
-  useEffect(() => {
-    setDetailDraft(selectedDetail?.markdown ?? "");
-  }, [selectedDetail]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -484,19 +453,17 @@ export function App() {
     };
   }, [contextMenu]);
 
-  const availableCount = filteredSkills.length;
-  const installedTabCount = installedFilteredSkills.length;
+  const availableCount = filteredMarketSkills.length;
+  const downloadedSkillCount = downloadedSkills.length;
+  const installedTargetCount = downloadedSkills.reduce(
+    (total, skill) => total + (skill.installedTargetCount ?? skill.installTargets.length),
+    0,
+  );
   const settingsChanged =
     JSON.stringify(settingsDraft) !== JSON.stringify(payload?.settings ?? EMPTY_SETTINGS);
   const currentSurfaceLabel = getSurfaceLabel(surface);
-  const selectedSkillSourceName = selectedSkill
-    ? getSourceDisplayName(selectedSkill.source, sources)
-    : "-";
-  const detailIsEditable = Boolean(selectedDetail?.localPath && selectedSkill?.isInstalled);
-  const detailDirty = detailDraft !== (selectedDetail?.markdown ?? "");
-  const selectedSkillContext = selectedSkill
-    ? buildSkillContext(selectedSkill, settingsDraft)
-    : undefined;
+  const currentAgentLabel = getAgentLabel(settingsDraft.agentType);
+  const currentInstallScopeLabel = getInstallScopeLabel(settingsDraft.installScope);
   const contextMenuPosition = contextMenu
     ? clampContextMenuPosition(contextMenu.x, contextMenu.y)
     : null;
@@ -508,108 +475,20 @@ export function App() {
     .filter(Boolean)
     .join(" ");
   const activeSourceStatus =
-    activeCategory === "高赞" && activeSource !== "全部"
+    surface === "market" && activeCategory === "高赞" && activeSource !== "全部"
       ? sourceStatusMap.get(activeSource)
       : undefined;
   const runtimeStatusText = getRuntimeStatusText(status, payload);
   const listEmptyText =
-    currentTab === "installed"
-      ? "暂无已安装技能"
+    surface === "install"
+      ? downloadedSkills.length
+        ? "未找到匹配的已下载技能。"
+        : "暂无已下载技能。"
       : activeSourceStatus?.status === "error"
         ? `来源 ${activeSourceStatus.displayName} 加载失败${activeSourceStatus.error ? `：${activeSourceStatus.error}` : "。"}`
         : activeSourceStatus?.status === "empty"
           ? `来源 ${activeSourceStatus.displayName} 当前没有可显示技能。`
           : "未发现匹配的技能";
-
-  async function runSkillAction(skill: Skill, action: SkillAction) {
-    const isMutatingAction =
-      action === "install" ||
-      action === "update" ||
-      action === "restore" ||
-      action === "uninstall";
-
-    if (isMutatingAction) {
-      setBusySkillId(skill.id);
-      setStatus({
-        tone: "info",
-        text:
-          action === "install"
-            ? `正在安装 ${skill.name}...`
-            : action === "update"
-              ? `正在更新 ${skill.name}...`
-              : action === "restore"
-                ? `正在恢复 ${skill.name} 的官方版本...`
-                : `正在删除 ${skill.name}...`,
-      });
-    }
-
-    try {
-      if (action === "install") {
-        const result = await installSkill(skill);
-        setStatus({
-          tone: result.warning ? "warning" : "success",
-          text: result.warning ? `${result.message}\n${result.warning}` : result.message,
-        });
-        await refreshMarketplace(true);
-      } else if (action === "update") {
-        const result = await updateSkill(skill);
-        setStatus({
-          tone: result.warning ? "warning" : "success",
-          text: result.warning ? `${result.message}\n${result.warning}` : result.message,
-        });
-        await refreshMarketplace(true);
-      } else if (action === "restore") {
-        const confirmed = await confirmDanger(
-          `确定恢复 "${skill.name}" 的官方版本吗？本地修改会被覆盖。`,
-        );
-        if (!confirmed) {
-          setStatus(null);
-          return;
-        }
-        const result = await restoreSkill(skill);
-        setStatus({
-          tone: result.warning ? "warning" : "success",
-          text: result.warning ? `${result.message}\n${result.warning}` : result.message,
-        });
-        await refreshMarketplace(true);
-      } else if (action === "uninstall") {
-        const confirmed = await confirmDanger(`确定删除 "${skill.name}" 吗？`);
-        if (!confirmed) {
-          setStatus(null);
-          return;
-        }
-        const result = await uninstallSkill(skill.id);
-        setStatus({
-          tone: result.warning ? "warning" : "success",
-          text: result.warning ? `${result.message}\n${result.warning}` : result.message,
-        });
-        await refreshMarketplace(true);
-      } else if (action === "openRepo") {
-        if (skill.repoLink) {
-          await openExternalUrl(skill.repoLink);
-        }
-      } else if (action === "openDir") {
-        if (!skill.actualPath) {
-          throw new Error("该技能当前未安装，无法打开目录。");
-        }
-        await openLocalPath(skill.actualPath);
-      } else if (action === "openReadme") {
-        if (!selectedDetail?.localPath) {
-          throw new Error("未找到本地 SKILL.md。");
-        }
-        await openLocalPath(selectedDetail.localPath);
-      }
-    } catch (error) {
-      setStatus({
-        tone: "error",
-        text: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      if (isMutatingAction) {
-        setBusySkillId(null);
-      }
-    }
-  }
 
   function handleInspectContextMenu(event: ReactMouseEvent<HTMLElement>) {
     if (!event.altKey) {
@@ -674,6 +553,50 @@ export function App() {
     }
   }
 
+  async function handleQuickInstallSettingChange(
+    key: QuickInstallSettingKey,
+    value: string,
+  ) {
+    const savedSettings = payload?.settings ?? EMPTY_SETTINGS;
+    const previousDraftValue = settingsDraft[key];
+
+    setSettingsDraft((current) => ({ ...current, [key]: value }));
+
+    if (value === savedSettings[key]) {
+      return;
+    }
+
+    setSavingQuickSetting(key);
+
+    try {
+      await saveSettings({ ...savedSettings, [key]: value });
+      await refreshMarketplace(true, { background: true });
+
+      const settingName = key === "agentType" ? "安装目标" : "安装范围";
+      const selectedLabel =
+        key === "agentType" ? getAgentLabel(value) : getInstallScopeLabel(value);
+      const missingProjectRoot =
+        key === "installScope" &&
+        value === "project" &&
+        !settingsDraft.projectRoot.trim();
+
+      setStatus({
+        tone: missingProjectRoot ? "warning" : "success",
+        text: missingProjectRoot
+          ? `已将${settingName}切换为${selectedLabel}。\n当前未保存项目根目录，安装前请先到设置中填写并保存。`
+          : `已将${settingName}切换为${selectedLabel}。`,
+      });
+    } catch (error) {
+      setSettingsDraft((current) => ({ ...current, [key]: previousDraftValue }));
+      setStatus({
+        tone: "error",
+        text: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSavingQuickSetting(null);
+    }
+  }
+
   async function handlePickProjectRoot() {
     try {
       const picked = await pickDirectory("选择项目根目录");
@@ -702,32 +625,6 @@ export function App() {
     }
   }
 
-  async function handleSaveLocalReadme() {
-    if (!selectedSkill || !detailIsEditable) {
-      return;
-    }
-
-    setDetailSaving(true);
-    try {
-      const result = await saveSkillReadme(selectedSkill.id, detailDraft);
-      setSelectedDetail((current) =>
-        current ? { ...current, markdown: detailDraft } : current,
-      );
-      setStatus({
-        tone: result.warning ? "warning" : "success",
-        text: result.warning ? `${result.message}\n${result.warning}` : result.message,
-      });
-      await refreshMarketplace(false, { background: true });
-    } catch (error) {
-      setStatus({
-        tone: "error",
-        text: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setDetailSaving(false);
-    }
-  }
-
   function toggleSidebar() {
     setSidebarCollapsed((current) => !current);
   }
@@ -739,11 +636,10 @@ export function App() {
   return (
     <main className={shellClassName} onContextMenuCapture={handleInspectContextMenu}>
       <AppSidebar
-        currentTab={currentTab}
-        installedTabCount={installedTabCount}
+        downloadedSkillCount={downloadedSkillCount}
+        installedTargetCount={installedTargetCount}
         onExpandSidebar={expandSidebar}
         onSurfaceChange={setSurface}
-        onTabChange={setCurrentTab}
         onToggleSidebar={toggleSidebar}
         sidebarCollapsed={sidebarCollapsed}
         surface={surface}
@@ -769,7 +665,9 @@ export function App() {
             text:
               surface === "settings"
                 ? "应用设置 管理安装路径、翻译配置和界面显示行为。"
-                : "技能市场 使用旧版来源分类与桌面工作区来浏览和管理技能。",
+                : surface === "install"
+                  ? "安装页面 管理本地已下载技能并以引用方式安装到各终端。"
+                  : "技能市场 浏览远端技能并先下载到本地仓库。",
             context: { "当前页面": currentSurfaceLabel },
           })}
         >
@@ -783,14 +681,18 @@ export function App() {
               text:
                 surface === "settings"
                   ? "应用设置 管理安装路径、翻译配置和界面显示行为。"
-                  : "技能市场 使用旧版来源分类与桌面工作区来浏览和管理技能。",
+                  : surface === "install"
+                    ? "安装页面 管理本地已下载技能并以引用方式安装到各终端。"
+                    : "技能市场 浏览远端技能并先下载到本地仓库。",
             })}
           >
             <strong>{currentSurfaceLabel}</strong>
             <span>
               {surface === "settings"
                 ? "管理安装路径、翻译配置和界面显示行为。"
-                : "使用旧版来源分类与桌面工作区来浏览和管理技能。"}
+                : surface === "install"
+                  ? "管理本地已下载技能，并把它们引用安装到不同终端。"
+                  : "浏览远端技能，先下载到本地仓库，再进入安装页完成引用安装。"}
             </span>
           </div>
 
@@ -807,7 +709,7 @@ export function App() {
               <input
                 className="desktop-search"
                 type="search"
-                placeholder="搜索技能..."
+                placeholder={surface === "install" ? "搜索已下载技能..." : "搜索技能..."}
                 value={searchText}
                 onChange={(event) => setSearchText(event.target.value)}
                 {...getComponentAttrs({
@@ -1004,39 +906,6 @@ export function App() {
                   >
                     <option value="global">全局</option>
                     <option value="project">项目</option>
-                  </select>
-                </label>
-
-                <label
-                  {...getComponentAttrs({
-                    id: "settings-field-install-mode",
-                    label: "安装策略设置项",
-                    type: "设置项",
-                    location: "设置 > 安装位置",
-                    text: "安装策略",
-                    context: { "设置项": "安装策略" },
-                  })}
-                >
-                  <span>安装策略</span>
-                  <select
-                    value={settingsDraft.installMode}
-                    onChange={(event) =>
-                      setSettingsDraft((current) => ({
-                        ...current,
-                        installMode: event.target.value,
-                      }))
-                    }
-                    {...getComponentAttrs({
-                      id: "settings-input-install-mode",
-                      label: "安装策略选择器",
-                      type: "下拉选择",
-                      location: "设置 > 安装位置",
-                      value: getInstallModeLabel(settingsDraft.installMode),
-                      context: { "设置项": "安装策略" },
-                    })}
-                  >
-                    <option value="reference">引用安装（推荐）</option>
-                    <option value="copy">复制安装</option>
                   </select>
                 </label>
 
@@ -1400,86 +1269,199 @@ export function App() {
           <section
             className="market-workspace"
             {...getComponentAttrs({
-              id: "market-workspace",
-              label: "技能市场工作区",
+              id: surface === "install" ? "install-workspace" : "market-workspace",
+              label: surface === "install" ? "安装工作区" : "技能市场工作区",
               type: "工作区",
               location: "主工作区",
               context: { "当前页面": currentSurfaceLabel },
             })}
           >
-            <div
-              className="market-tabs"
-              {...getComponentAttrs({
-                id: "market-tabs",
-                label: "技能市场标签栏",
-                type: "标签栏",
-                location: "主工作区顶部",
-                context: { "当前标签": currentTab === "installed" ? "已安装" : "发现技能" },
-              })}
-            >
-              <button
-                type="button"
-                className={currentTab === "available" ? "market-tab active" : "market-tab"}
-                onClick={() => setCurrentTab("available")}
+            {surface === "install" ? (
+              <div
+                className="market-tabs"
                 {...getComponentAttrs({
-                  id: "market-tab-available",
-                  label: "发现技能标签",
-                  type: "标签按钮",
+                  id: "install-target-bar",
+                  label: "安装目标配置栏",
+                  type: "配置栏",
                   location: "主工作区顶部",
-                  text: "发现技能",
-                  state: createStateList(currentTab === "available" ? "已选中" : undefined),
+                  context: {
+                    "安装目标": currentAgentLabel,
+                    "安装范围": currentInstallScopeLabel,
+                    "项目根目录": settingsDraft.projectRoot || "未设置",
+                  },
                 })}
               >
-                发现技能 <span className="market-tab-count">{availableCount}</span>
-              </button>
-              <button
-                type="button"
-                className={currentTab === "installed" ? "market-tab active" : "market-tab"}
-                onClick={() => setCurrentTab("installed")}
-                {...getComponentAttrs({
-                  id: "market-tab-installed",
-                  label: "已安装标签",
-                  type: "标签按钮",
-                  location: "主工作区顶部",
-                  text: "已安装",
-                  state: createStateList(currentTab === "installed" ? "已选中" : undefined),
-                })}
-              >
-                已安装 <span className="market-tab-count">{installedTabCount}</span>
-              </button>
-            </div>
-
-            <div
-              className="market-categories"
-              {...getComponentAttrs({
-                id: "market-categories",
-                label: "技能分类栏",
-                type: "筛选栏",
-                location: "主工作区顶部",
-                context: { "当前分类": activeCategory },
-              })}
-            >
-              {categories.map((category) => (
-                <button
-                  key={category}
-                  type="button"
-                  className={activeCategory === category ? "category-chip active" : "category-chip"}
-                  onClick={() => setActiveCategory(category)}
+                <div
+                  className="market-tab-controls"
                   {...getComponentAttrs({
-                    id: `category-chip:${category}`,
-                    label: `${category} 分类按钮`,
-                    type: "筛选按钮",
+                    id: "install-target-controls",
+                    label: "安装目标设置区",
+                    type: "组合控件",
                     location: "主工作区顶部",
-                    text: category,
-                    state: createStateList(activeCategory === category ? "已选中" : undefined),
+                    context: {
+                      "安装目标": currentAgentLabel,
+                      "安装范围": currentInstallScopeLabel,
+                    },
                   })}
                 >
-                  {category === "高赞" ? "✓ 高赞榜" : category}
-                </button>
-              ))}
-            </div>
+                  <label
+                    className="market-inline-field"
+                    {...getComponentAttrs({
+                      id: "install-field-agent-type",
+                      label: "安装目标设置项",
+                      type: "设置项",
+                      location: "主工作区顶部",
+                      text: "安装目标",
+                      context: { "当前值": currentAgentLabel },
+                    })}
+                  >
+                    <span>安装目标</span>
+                    <select
+                      value={settingsDraft.agentType}
+                      disabled={savingQuickSetting !== null}
+                      onChange={(event) =>
+                        void handleQuickInstallSettingChange("agentType", event.target.value)
+                      }
+                      {...getComponentAttrs({
+                        id: "install-input-agent-type",
+                        label: "安装目标选择器",
+                        type: "下拉选择",
+                        location: "主工作区顶部",
+                        value: currentAgentLabel,
+                        state: createStateList(
+                          savingQuickSetting === "agentType" ? "正在保存" : "已同步",
+                        ),
+                        context: { "设置项": "安装目标" },
+                      })}
+                    >
+                      {AGENT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-            {activeCategory === "高赞" ? (
+                  <label
+                    className="market-inline-field"
+                    {...getComponentAttrs({
+                      id: "install-field-install-scope",
+                      label: "安装范围设置项",
+                      type: "设置项",
+                      location: "主工作区顶部",
+                      text: "安装范围",
+                      context: { "当前值": currentInstallScopeLabel },
+                    })}
+                  >
+                    <span>安装范围</span>
+                    <select
+                      value={settingsDraft.installScope}
+                      disabled={savingQuickSetting !== null}
+                      onChange={(event) =>
+                        void handleQuickInstallSettingChange("installScope", event.target.value)
+                      }
+                      {...getComponentAttrs({
+                        id: "install-input-install-scope",
+                        label: "安装范围选择器",
+                        type: "下拉选择",
+                        location: "主工作区顶部",
+                        value: currentInstallScopeLabel,
+                        state: createStateList(
+                          savingQuickSetting === "installScope" ? "正在保存" : "已同步",
+                        ),
+                        context: { "设置项": "安装范围" },
+                      })}
+                    >
+                      <option value="global">全局</option>
+                      <option value="project">项目</option>
+                    </select>
+                  </label>
+
+                  {settingsDraft.installScope === "project" ? (
+                    <label
+                      className="market-inline-field market-inline-field-wide"
+                      {...getComponentAttrs({
+                        id: "install-field-project-root",
+                        label: "安装页项目根目录设置项",
+                        type: "设置项",
+                        location: "主工作区顶部",
+                        text: "项目根目录",
+                        context: { "当前值": settingsDraft.projectRoot || "未设置" },
+                      })}
+                    >
+                      <span>项目根目录</span>
+                      <input
+                        type="text"
+                        value={settingsDraft.projectRoot}
+                        placeholder="安装到项目作用域时必填"
+                        onChange={(event) =>
+                          setSettingsDraft((current) => ({
+                            ...current,
+                            projectRoot: event.target.value,
+                          }))
+                        }
+                        {...getComponentAttrs({
+                          id: "install-input-project-root",
+                          label: "安装页项目根目录输入框",
+                          type: "输入框",
+                          location: "主工作区顶部",
+                          value: settingsDraft.projectRoot || "未设置",
+                          state: createStateList(settingsDraft.projectRoot ? "已填写" : "空白"),
+                        })}
+                      />
+                      <button
+                        type="button"
+                        className="toolbar-button"
+                        onClick={() => void handlePickProjectRoot()}
+                        {...getComponentAttrs({
+                          id: "install-button-project-root-browse",
+                          label: "安装页项目根目录浏览按钮",
+                          type: "按钮",
+                          location: "主工作区顶部",
+                          text: "浏览",
+                        })}
+                      >
+                        浏览
+                      </button>
+                    </label>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {surface === "market" ? (
+              <div
+                className="market-categories"
+                {...getComponentAttrs({
+                  id: "market-categories",
+                  label: "技能分类栏",
+                  type: "筛选栏",
+                  location: "主工作区顶部",
+                  context: { "当前分类": activeCategory },
+                })}
+              >
+                {categories.map((category) => (
+                  <button
+                    key={category}
+                    type="button"
+                    className={activeCategory === category ? "category-chip active" : "category-chip"}
+                    onClick={() => setActiveCategory(category)}
+                    {...getComponentAttrs({
+                      id: `category-chip:${category}`,
+                      label: `${category} 分类按钮`,
+                      type: "筛选按钮",
+                      location: "主工作区顶部",
+                      text: category,
+                      state: createStateList(activeCategory === category ? "已选中" : undefined),
+                    })}
+                  >
+                    {category === "高赞" ? "✓ 高赞榜" : category}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {surface === "market" && activeCategory === "高赞" ? (
               <div
                 className="source-filter-container visible"
                 {...getComponentAttrs({
@@ -1558,7 +1540,7 @@ export function App() {
                 label: "列表详情工作区",
                 type: "工作区",
                 location: "主工作区",
-                context: { "当前页面": currentSurfaceLabel, "当前标签": currentTab },
+                context: { "当前页面": currentSurfaceLabel },
               })}
             >
               <section
@@ -1568,7 +1550,7 @@ export function App() {
                   label: "技能列表区",
                   type: "列表区域",
                   location: "主工作区 > 左侧列表区",
-                  context: { "当前页面": currentSurfaceLabel, "当前标签": currentTab },
+                  context: { "当前页面": currentSurfaceLabel },
                 })}
               >
               <div
@@ -1665,11 +1647,11 @@ export function App() {
                       label: "技能列表加载状态",
                       type: "空状态",
                       location: "主工作区 > 左侧列表区",
-                      text: "正在加载技能市场数据...",
+                      text: surface === "install" ? "正在加载本地安装数据..." : "正在加载技能市场数据...",
                       state: createStateList("加载中"),
                     })}
                   >
-                    正在加载技能市场数据...
+                    {surface === "install" ? "正在加载本地安装数据..." : "正在加载技能市场数据..."}
                   </div>
                 ) : null}
                 {!loading && !visibleSkills.length ? (
@@ -1737,11 +1719,19 @@ export function App() {
                           <span className="skill-cell">{skillCategory}</span>
                           <span className="skill-cell">{formatUpdatedAt(skill.lastUpdated)}</span>
                           <span className="skill-cell status-cell">
-                            {skill.isInstalled ? <span className="row-badge success">已安装</span> : null}
+                            {skill.isDownloaded ? <span className="row-badge success">已下载</span> : null}
+                            {skill.installedTargetCount ? (
+                              <span className="row-badge success">
+                                已安装 {skill.installedTargetCount}
+                              </span>
+                            ) : null}
                             {skill.hasUpdate ? <span className="row-badge warning">可更新</span> : null}
                             {skill.isLocalModified ? <span className="row-badge warning">已修改</span> : null}
-                            {!skill.isInstalled && !skill.hasUpdate && !skill.isLocalModified ? (
-                              <span className="row-badge">可安装</span>
+                            {!skill.isDownloaded && !skill.hasUpdate && !skill.isLocalModified ? (
+                              <span className="row-badge">可下载</span>
+                            ) : null}
+                            {skill.isDownloaded && !skill.installedTargetCount && !skill.hasUpdate ? (
+                              <span className="row-badge">待安装</span>
                             ) : null}
                           </span>
                         </button>
@@ -1751,466 +1741,14 @@ export function App() {
               </div>
             </section>
 
-            <aside
-              className="detail-pane"
-              {...getComponentAttrs({
-                id: "skill-detail-pane",
-                label: "技能详情区",
-                type: "详情区域",
-                location: "主工作区 > 右侧详情区",
-                state: createStateList(selectedSkill ? undefined : "空状态"),
-                context: selectedSkillContext,
-              })}
-            >
-              {selectedSkill ? (
-                <>
-                  <div
-                    className="detail-toolbar"
-                    {...getComponentAttrs({
-                      id: "skill-detail-toolbar",
-                      label: "技能详情头部",
-                      type: "标题区",
-                      location: "主工作区 > 右侧详情区",
-                      text: `${selectedSkill.name} ${selectedSkillSourceName} ${getVisibleCategory(selectedSkill, settingsDraft)}`,
-                      context: { ...selectedSkillContext, "来源显示名": selectedSkillSourceName },
-                    })}
-                  >
-                    <div
-                      {...getComponentAttrs({
-                        id: "skill-detail-summary",
-                        label: "技能详情摘要",
-                        type: "摘要区",
-                        location: "主工作区 > 右侧详情区",
-                        text: `${selectedSkill.name} ${selectedSkillSourceName} ${getVisibleCategory(selectedSkill, settingsDraft)}`,
-                        context: { ...selectedSkillContext, "来源显示名": selectedSkillSourceName },
-                      })}
-                    >
-                      <h2
-                        {...getComponentAttrs({
-                          id: "skill-detail-title",
-                          label: "技能详情标题",
-                          type: "标题文本",
-                          location: "主工作区 > 右侧详情区",
-                          text: selectedSkill.name,
-                          context: selectedSkillContext,
-                        })}
-                      >
-                        {selectedSkill.name}
-                      </h2>
-                      <p
-                        {...getComponentAttrs({
-                          id: "skill-detail-subtitle",
-                          label: "技能详情副标题",
-                          type: "说明文本",
-                          location: "主工作区 > 右侧详情区",
-                          text: `${selectedSkillSourceName} · ${getVisibleCategory(selectedSkill, settingsDraft)}`,
-                          context: { ...selectedSkillContext, "来源显示名": selectedSkillSourceName },
-                        })}
-                      >
-                        {selectedSkillSourceName} · {getVisibleCategory(selectedSkill, settingsDraft)}
-                      </p>
-                      <span
-                        className="detail-copy-hint"
-                        {...getComponentAttrs({
-                          id: "skill-detail-copy-hint",
-                          label: "组件检查提示",
-                          type: "提示文本",
-                          location: "主工作区 > 右侧详情区",
-                          text: "按住 Alt 并右键可复制当前组件信息",
-                        })}
-                      >
-                        按住 Alt 并右键可复制当前组件信息
-                      </span>
-                    </div>
-                    <div
-                      className="detail-toolbar-actions"
-                      {...getComponentAttrs({
-                        id: "skill-detail-toolbar-actions",
-                        label: "技能详情头部操作区",
-                        type: "操作区",
-                        location: "主工作区 > 右侧详情区",
-                        context: selectedSkillContext,
-                      })}
-                    >
-                      {selectedSkill.repoLink ? (
-                        <button
-                          className="toolbar-button"
-                          onClick={() => void runSkillAction(selectedSkill, "openRepo")}
-                          {...getComponentAttrs({
-                            id: "skill-detail-button-open-repo",
-                            label: "打开仓库按钮",
-                            type: "按钮",
-                            location: "主工作区 > 右侧详情区",
-                            text: "仓库",
-                            context: selectedSkillContext,
-                          })}
-                        >
-                          仓库
-                        </button>
-                      ) : null}
-                      {selectedSkill.isInstalled ? (
-                        <>
-                          <button
-                            className="toolbar-button"
-                            onClick={() => void runSkillAction(selectedSkill, "openReadme")}
-                            {...getComponentAttrs({
-                              id: "skill-detail-button-open-readme",
-                              label: "编辑 README 按钮",
-                              type: "按钮",
-                              location: "主工作区 > 右侧详情区",
-                              text: "编辑 README",
-                              context: selectedSkillContext,
-                            })}
-                          >
-                            编辑 README
-                          </button>
-                          <button
-                            className="toolbar-button"
-                            onClick={() => void runSkillAction(selectedSkill, "openDir")}
-                            {...getComponentAttrs({
-                              id: "skill-detail-button-open-dir",
-                              label: "打开目录按钮",
-                              type: "按钮",
-                              location: "主工作区 > 右侧详情区",
-                              text: "打开目录",
-                              context: selectedSkillContext,
-                            })}
-                          >
-                            打开目录
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <section
-                    className="detail-section"
-                    {...getComponentAttrs({
-                      id: "skill-detail-overview",
-                      label: "技能概要区",
-                      type: "详情分组",
-                      location: "主工作区 > 右侧详情区",
-                      text: getVisibleDescription(selectedSkill, settingsDraft),
-                      context: selectedSkillContext,
-                    })}
-                  >
-                    <div
-                      className="detail-metrics"
-                      {...getComponentAttrs({
-                        id: "skill-detail-metrics",
-                        label: "技能状态指标区",
-                        type: "指标区",
-                        location: "主工作区 > 右侧详情区",
-                        context: selectedSkillContext,
-                      })}
-                    >
-                      <div
-                        {...getComponentAttrs({
-                          id: "skill-detail-metric-installed-version",
-                          label: "已安装版本指标",
-                          type: "指标卡片",
-                          location: "主工作区 > 右侧详情区",
-                          text: selectedSkill.installedVersion || "未安装",
-                          context: selectedSkillContext,
-                        })}
-                      >
-                        <span>已安装版本</span>
-                        <strong>{selectedSkill.installedVersion || "未安装"}</strong>
-                      </div>
-                      <div
-                        {...getComponentAttrs({
-                          id: "skill-detail-metric-latest-version",
-                          label: "最新版本指标",
-                          type: "指标卡片",
-                          location: "主工作区 > 右侧详情区",
-                          text: selectedSkill.commitSha || "未获取",
-                          context: selectedSkillContext,
-                        })}
-                      >
-                        <span>最新版本</span>
-                        <strong>{selectedSkill.commitSha || "未获取"}</strong>
-                      </div>
-                      <div
-                        {...getComponentAttrs({
-                          id: "skill-detail-metric-local-status",
-                          label: "本地状态指标",
-                          type: "指标卡片",
-                          location: "主工作区 > 右侧详情区",
-                          text: selectedSkill.isLocalModified ? "已修改" : "干净",
-                          context: selectedSkillContext,
-                        })}
-                      >
-                        <span>本地状态</span>
-                        <strong>{selectedSkill.isLocalModified ? "已修改" : "干净"}</strong>
-                      </div>
-                      <div
-                        {...getComponentAttrs({
-                          id: "skill-detail-metric-install-mode",
-                          label: "安装模式指标",
-                          type: "指标卡片",
-                          location: "主工作区 > 右侧详情区",
-                          text: getInstallModeLabel(selectedSkill.installMode),
-                          context: selectedSkillContext,
-                        })}
-                      >
-                        <span>安装模式</span>
-                        <strong>{getInstallModeLabel(selectedSkill.installMode)}</strong>
-                      </div>
-                      <div
-                        {...getComponentAttrs({
-                          id: "skill-detail-metric-install-path",
-                          label: "安装目录指标",
-                          type: "指标卡片",
-                          location: "主工作区 > 右侧详情区",
-                          text: selectedSkill.installPath || "未解析",
-                          context: selectedSkillContext,
-                        })}
-                      >
-                        <span>安装目录</span>
-                        <strong>{selectedSkill.installPath || "未解析"}</strong>
-                      </div>
-                      <div
-                        {...getComponentAttrs({
-                          id: "skill-detail-metric-actual-path",
-                          label: "实际存储目录指标",
-                          type: "指标卡片",
-                          location: "主工作区 > 右侧详情区",
-                          text: selectedSkill.actualPath || selectedSkill.installPath || "未解析",
-                          context: selectedSkillContext,
-                        })}
-                      >
-                        <span>实际目录</span>
-                        <strong>{selectedSkill.actualPath || selectedSkill.installPath || "未解析"}</strong>
-                      </div>
-                    </div>
-                    <p
-                      {...getComponentAttrs({
-                        id: "skill-detail-description",
-                        label: "技能描述文本",
-                        type: "说明文本",
-                        location: "主工作区 > 右侧详情区",
-                        text: getVisibleDescription(selectedSkill, settingsDraft),
-                        context: selectedSkillContext,
-                      })}
-                    >
-                      {getVisibleDescription(selectedSkill, settingsDraft)}
-                    </p>
-                    <div
-                      className="detail-path-list"
-                      {...getComponentAttrs({
-                        id: "skill-detail-path-list",
-                        label: "安装路径说明",
-                        type: "说明列表",
-                        location: "主工作区 > 右侧详情区",
-                        text: `${selectedSkill.installPath || "未解析"} ${selectedSkill.actualPath || selectedSkill.installPath || "未解析"}`,
-                        context: selectedSkillContext,
-                      })}
-                    >
-                      <span>引用入口：{selectedSkill.installPath || "未解析"}</span>
-                      <span>实际目录：{selectedSkill.actualPath || selectedSkill.installPath || "未解析"}</span>
-                    </div>
-                  </section>
-
-                  <section
-                    className="detail-section"
-                    {...getComponentAttrs({
-                      id: "skill-detail-actions",
-                      label: "技能操作区",
-                      type: "操作区",
-                      location: "主工作区 > 右侧详情区",
-                      context: selectedSkillContext,
-                    })}
-                  >
-                    <div className="action-group">
-                      {!selectedSkill.isInstalled ? (
-                        <button
-                          className="toolbar-button primary"
-                          disabled={busySkillId === selectedSkill.id}
-                          onClick={() => void runSkillAction(selectedSkill, "install")}
-                          {...getComponentAttrs({
-                            id: "skill-detail-button-install",
-                            label: "安装按钮",
-                            type: "按钮",
-                            location: "主工作区 > 右侧详情区",
-                            text: "安装",
-                            state: createStateList(
-                              busySkillId === selectedSkill.id ? "处理中" : undefined,
-                            ),
-                            context: selectedSkillContext,
-                          })}
-                        >
-                          安装
-                        </button>
-                      ) : null}
-                      {selectedSkill.hasUpdate && !selectedSkill.isLocalModified ? (
-                        <button
-                          className="toolbar-button primary"
-                          disabled={busySkillId === selectedSkill.id}
-                          onClick={() => void runSkillAction(selectedSkill, "update")}
-                          {...getComponentAttrs({
-                            id: "skill-detail-button-update",
-                            label: "更新按钮",
-                            type: "按钮",
-                            location: "主工作区 > 右侧详情区",
-                            text: "更新",
-                            state: createStateList(
-                              busySkillId === selectedSkill.id ? "处理中" : undefined,
-                            ),
-                            context: selectedSkillContext,
-                          })}
-                        >
-                          更新
-                        </button>
-                      ) : null}
-                      {selectedSkill.isLocalModified ? (
-                        <button
-                          className="toolbar-button warning"
-                          disabled={busySkillId === selectedSkill.id}
-                          onClick={() => void runSkillAction(selectedSkill, "restore")}
-                          {...getComponentAttrs({
-                            id: "skill-detail-button-restore",
-                            label: "恢复官方版按钮",
-                            type: "按钮",
-                            location: "主工作区 > 右侧详情区",
-                            text: "恢复官方版",
-                            state: createStateList(
-                              busySkillId === selectedSkill.id ? "处理中" : undefined,
-                            ),
-                            context: selectedSkillContext,
-                          })}
-                        >
-                          恢复官方版
-                        </button>
-                      ) : null}
-                      {selectedSkill.isInstalled ? (
-                        <button
-                          className="toolbar-button danger"
-                          disabled={busySkillId === selectedSkill.id}
-                          onClick={() => void runSkillAction(selectedSkill, "uninstall")}
-                          {...getComponentAttrs({
-                            id: "skill-detail-button-uninstall",
-                            label: "删除按钮",
-                            type: "按钮",
-                            location: "主工作区 > 右侧详情区",
-                            text: "删除",
-                            state: createStateList(
-                              busySkillId === selectedSkill.id ? "处理中" : undefined,
-                            ),
-                            context: selectedSkillContext,
-                          })}
-                        >
-                          删除
-                        </button>
-                      ) : null}
-                    </div>
-                  </section>
-
-                  <section
-                    className="detail-section markdown-section"
-                    {...getComponentAttrs({
-                      id: "skill-detail-markdown",
-                      label: "SKILL.md 预览区",
-                      type: "文档预览区",
-                      location: "主工作区 > 右侧详情区",
-                      state: createStateList(detailLoading ? "加载中" : "已加载"),
-                      context: selectedSkillContext,
-                    })}
-                  >
-                    <div
-                      className="section-head"
-                      {...getComponentAttrs({
-                        id: "skill-detail-markdown-header",
-                        label: "SKILL.md 标题栏",
-                        type: "标题区",
-                        location: "主工作区 > 右侧详情区",
-                        text: "SKILL.md",
-                      })}
-                    >
-                      <strong>SKILL.md</strong>
-                      <div className="detail-markdown-actions">
-                        {detailIsEditable ? (
-                          <button
-                            type="button"
-                            className="toolbar-button primary"
-                            disabled={!detailDirty || detailSaving}
-                            onClick={() => void handleSaveLocalReadme()}
-                            {...getComponentAttrs({
-                              id: "skill-detail-button-save-readme",
-                              label: "保存本地 README 按钮",
-                              type: "按钮",
-                              location: "主工作区 > 右侧详情区",
-                              text: detailSaving ? "保存中" : "保存",
-                              state: createStateList(
-                                detailDirty ? "有未保存修改" : "无需保存",
-                                detailSaving ? "处理中" : undefined,
-                              ),
-                            })}
-                          >
-                            {detailSaving ? "保存中…" : "保存"}
-                          </button>
-                        ) : null}
-                        {detailLoading ? <span>加载中…</span> : null}
-                      </div>
-                    </div>
-                    {detailIsEditable ? (
-                      <textarea
-                        className="markdown-editor"
-                        value={detailDraft}
-                        onChange={(event) => setDetailDraft(event.target.value)}
-                        {...getComponentAttrs({
-                          id: "skill-detail-markdown-editor",
-                          label: "SKILL.md 编辑器",
-                          type: "多行输入框",
-                          location: "主工作区 > 右侧详情区",
-                          value: detailDraft || "空白",
-                          state: createStateList(
-                            detailDirty ? "已修改" : "未修改",
-                            detailSaving ? "处理中" : undefined,
-                          ),
-                          context: selectedSkillContext,
-                        })}
-                      />
-                    ) : (
-                      <pre
-                        {...getComponentAttrs({
-                          id: "skill-detail-markdown-body",
-                          label: "SKILL.md 内容区",
-                          type: "文档内容",
-                          location: "主工作区 > 右侧详情区",
-                          text: selectedDetail?.markdown ? "已加载文档内容" : "暂无详情内容。",
-                          state: createStateList(detailLoading ? "加载中" : "已显示"),
-                          context: selectedSkillContext,
-                        })}
-                      >
-                        {selectedDetail?.markdown || "暂无详情内容。"}
-                      </pre>
-                    )}
-                  </section>
-                </>
-              ) : (
-                <div
-                  className="empty-state"
-                  {...getComponentAttrs({
-                    id: "skill-detail-empty",
-                    label: "技能详情空状态",
-                    type: "空状态",
-                    location: "主工作区 > 右侧详情区",
-                    text: "请选择一个技能查看详情和操作。",
-                    state: createStateList("空状态"),
-                  })}
-                >
-                  请选择一个技能查看详情和操作。
-                </div>
-              )}
-            </aside>
           </section>
           </section>
         )}
 
         <StatusBar
           availableCount={availableCount}
-          currentTab={currentTab}
-          installedTabCount={installedTabCount}
+          downloadedCount={downloadedSkillCount}
+          installedTargetCount={installedTargetCount}
           payload={payload}
           runtimeStatusText={runtimeStatusText}
           status={status}

@@ -1,9 +1,10 @@
-import type { SurfaceKey, TabKey, StatusState } from "../../app/types";
+import type { SurfaceKey, StatusState } from "../../app/types";
 import { createStateList, getComponentAttrs } from "../../features/inspect";
 
 interface StatusBarProps {
   availableCount: number;
-  currentTab: TabKey;
+  downloadedCount: number;
+  installedTargetCount: number;
   payload: {
     fromCache?: boolean;
     resolvedInstallPath?: string;
@@ -12,17 +13,16 @@ interface StatusBarProps {
   runtimeStatusText: string;
   status: StatusState | null;
   surface: SurfaceKey;
-  installedTabCount: number;
 }
 
 export function StatusBar({
   availableCount,
-  currentTab,
+  downloadedCount,
+  installedTargetCount,
   payload,
   runtimeStatusText,
   status,
   surface,
-  installedTabCount,
 }: StatusBarProps) {
   return (
     <footer
@@ -33,7 +33,8 @@ export function StatusBar({
         type: "状态栏",
         location: "底部状态栏",
         context: {
-          "当前页面": surface === "settings" ? "应用设置" : "技能市场",
+          "当前页面":
+            surface === "settings" ? "应用设置" : surface === "install" ? "安装" : "技能市场",
         },
       })}
     >
@@ -81,16 +82,16 @@ export function StatusBar({
           text:
             surface === "settings"
               ? "偏好设置"
-              : currentTab === "installed"
-                ? `已安装 ${installedTabCount} 项`
-                : `发现技能 ${availableCount} 项`,
+              : surface === "install"
+                ? `已下载 ${downloadedCount} 项 · 安装目标 ${installedTargetCount} 个`
+                : `技能市场 ${availableCount} 项`,
         })}
       >
         {surface === "settings"
           ? "偏好设置"
-          : currentTab === "installed"
-            ? `已安装 ${installedTabCount} 项`
-            : `发现技能 ${availableCount} 项`}
+          : surface === "install"
+            ? `已下载 ${downloadedCount} 项 · 安装目标 ${installedTargetCount} 个`
+            : `技能市场 ${availableCount} 项`}
       </span>
       <span
         {...getComponentAttrs({

@@ -1,5 +1,4 @@
-export type SurfaceKey = "market" | "settings";
-export type TabKey = "available" | "installed";
+export type SurfaceKey = "market" | "install" | "settings";
 export type StatusTone = "info" | "success" | "warning" | "error";
 
 export interface StatusState {
